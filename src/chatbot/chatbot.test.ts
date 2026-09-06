@@ -19,6 +19,7 @@ import {
   executeChatbotAnswerDecision,
   executionRouteOrChat,
   developerThreadName,
+  developerTraceBody,
   formatDiscordAnswer,
   formatDiscordAnswers,
   getNearbyHumanMessages,
@@ -2096,4 +2097,150 @@ describe("Discord chatbot", () => {
     expect(formatDiscordAnswer(longAnswer)).toHaveLength(2_000);
     expect(formatDiscordAnswer(longAnswer).endsWith("…")).toBe(true);
   });
+});
+
+test("renders developer progress as one checklist with the newest step active", () => {
+  const body = developerTraceBody("Working · owner/repo", [
+    "Analyzing branch naming",
+    "Evaluating branchless PR creation",
+  ]);
+  expect(body).toBe(
+    "**Working · owner/repo**\n\n✓ Analyzing branch naming\n▸ Evaluating branchless PR creation",
+  );
+});
+
+test("collapses older developer progress steps beyond the visible window", () => {
+  const lines = Array.from({ length: 11 }, (_, index) => `step ${index + 1}`);
+  const body = developerTraceBody("Working · owner/repo", lines);
+  expect(body).toContain("_…and 3 earlier steps_");
+  expect(body).not.toContain("✓ step 3");
+  expect(body).toContain("✓ step 4");
+  expect(body).toContain("▸ step 11");
+});
+
+test("keeps a structured embed alongside the reply", () => {
+  expect(
+    parseChatbotAnswerDecision(
+      JSON.stringify({
+        reply: "看這裡",
+        reaction: null,
+        embed: {
+          title: "比較",
+          description: null,
+          fields: [
+            { name: "A", value: "快" },
+            { name: "B", value: "省" },
+          ],
+        },
+      }),
+    ),
+  ).toEqual({
+    reply: "看這裡",
+    embed: {
+      title: "比較",
+      fields: [
+        { name: "A", value: "快" },
+        { name: "B", value: "省" },
+      ],
+    },
+  });
+});
+
+test("drops an empty or malformed embed without losing the reply", () => {
+  for (const embed of [null, {}, { title: "   ", description: null, fields: [] }, "nope"]) {
+    expect(
+      parseChatbotAnswerDecision(
+        JSON.stringify({ reply: "好", reaction: null, embed }),
+      ),
+    ).toEqual({ reply: "好" });
+  }
+});
+
+test("drops an embed that breaks first-person identity", () => {
+  expect(
+    parseChatbotAnswerDecision(
+      JSON.stringify({
+        reply: "好",
+        reaction: null,
+        embed: { title: "二乃 handles reminders", description: null, fields: [] },
+      }),
+    ),
+  ).toEqual({ reply: "好" });
+});
+
+test("caps embed fields and trims over-long embed text", () => {
+  const decision = parseChatbotAnswerDecision(
+    JSON.stringify({
+      reply: "好",
+      reaction: null,
+      embed: {
+        title: "t".repeat(400),
+        description: null,
+        fields: Array.from({ length: 9 }, (_, index) => ({
+          name: `n${index}`,
+          value: "v",
+        })),
+      },
+    }),
+  );
+  expect(decision.embed?.title).toHaveLength(256);
+  expect(decision.embed?.fields).toHaveLength(6);
+});
+
+test("attaches an embed to the first Discord message only", async () => {
+  const calls: Array<{ path: string; body?: unknown }> = [];
+  await postChatbotResponse(
+    { id: "m1", channel_id: "c1" } as never,
+    ["first", "second"],
+    (async (path: string, options?: { body?: unknown }) => {
+      calls.push({ path, body: options?.body });
+      return path.includes("limit=1") ? [] : { id: "posted" };
+    }) as never,
+    [],
+    { title: "面板", fields: [{ name: "n", value: "v" }] },
+  );
+  const posts = calls.filter((call) => call.path === "/channels/c1/messages");
+  const first = posts[0]?.body as { embeds?: Array<{ title?: string }> };
+  const second = posts[1]?.body as { embeds?: unknown };
+  expect(posts).toHaveLength(2);
+  expect(first.embeds?.[0]?.title).toBe("面板");
+  expect(second.embeds).toBeUndefined();
+});
+
+test("renders a narrow Markdown table as an aligned code block", () => {
+  const rendered = formatDiscordAnswer(
+    ["| 欄 | 值 |", "|---|---|", "| a | 1 |", "| bb | 22 |"].join("\n"),
+  );
+  expect(rendered).toBe(
+    ["```", "欄  值", "a   1", "bb  22", "```"].join("\n"),
+  );
+});
+
+test("falls back to a grouped list when a table is too wide for phones", () => {
+  const rendered = formatDiscordAnswer(
+    [
+      "| 項目 | GPT-5.6 Sol | GPT-5.6 Luna |",
+      "|---|---|---|",
+      "| 定位 | 旗艦專業模型 | 高性價比大量使用模型 |",
+      "| 輸入價格 | 每 100 萬 tokens 4 美元 | 0.20 美元 |",
+      "| 說明 | 這是一段刻意加長的中文說明用來確保超過門檻 | 另一段刻意加長的中文說明文字 |",
+    ].join("\n"),
+  );
+  expect(rendered).toContain("**定位**");
+  expect(rendered).toContain("- GPT-5.6 Sol — 旗艦專業模型");
+  expect(rendered).toContain("- GPT-5.6 Luna — 高性價比大量使用模型");
+  expect(rendered).toContain("**輸入價格**");
+  expect(rendered).not.toContain("|");
+});
+
+test("leaves tables inside code fences and bare pipes untouched", () => {
+  const fenced = [
+    "```",
+    "| a | b |",
+    "|---|---|",
+    "| 1 | 2 |",
+    "```",
+  ].join("\n");
+  expect(formatDiscordAnswer(fenced)).toBe(fenced);
+  expect(formatDiscordAnswer("a | b\nc | d")).toBe("a | b\nc | d");
 });

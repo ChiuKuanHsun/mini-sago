@@ -1,0 +1,15 @@
+services:
+  worker:
+    environment:
+      GIT_AUTHOR_NAME: MiniKuanHsun
+      GIT_AUTHOR_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
+      GIT_COMMITTER_NAME: MiniKuanHsun
+      GIT_COMMITTER_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
+    networks:
+      default:
+      sandbox-internal:
+      minisago-edge:
+
+networks:
+  minisago-edge:
+    external: true

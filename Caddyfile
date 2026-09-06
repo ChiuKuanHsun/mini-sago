@@ -1,8 +1,19 @@
 {
-      # 想收憑證到期通知就填 email，留著註解也可以
-      email kuanhsunextension@gmail.com
+	# 想收憑證到期通知就填 email
+	# email you@example.com
 }
 
 kuanhsun.dpdns.org {
-      reverse_proxy core:3000
+	# 只有這兩條需要從公網進來：
+	#   /api/github/webhook  GitHub 必須打得到
+	#   /api/health          外部健康檢查
+	# /api/mac-agent/ws 與 /api/chatbot/mcp 刻意不公開 ——
+	# worker 走 ws://core:3000 的容器內部連線，不經過這裡。
+	@public path /api/github/webhook /api/health
+	handle @public {
+		reverse_proxy core:3000
+	}
+	handle {
+		respond 404
+	}
 }
