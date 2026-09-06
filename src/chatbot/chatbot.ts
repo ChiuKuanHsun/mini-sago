@@ -570,8 +570,17 @@ export function renderDiscordTables(content: string) {
   return output.join("\n");
 }
 
+// Codex 的網頁搜尋引用會夾帶私有區碼點；客戶端不會渲染它們，
+// 複製出來就變成 citeturn0search0 這種裸字串，所以在送出前剝掉。
+export function stripSearchCitations(content: string) {
+  return content
+    .replace(/[\u{E000}-\u{F8FF}]/gu, "")
+    .replace(/\s*cite(?:turn\d+[a-z]+\d+)+/giu, "")
+    .replace(/[ \t]+$/gmu, "");
+}
+
 function normalizeDiscordAnswer(content: string) {
-  const normalized = content.trim();
+  const normalized = stripSearchCitations(content).trim();
 
   if (!normalized) {
     return "剛剛腦袋一片空白 再問一次 這次講清楚點";

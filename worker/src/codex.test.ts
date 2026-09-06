@@ -879,7 +879,11 @@ describe("Codex chatbot runner", () => {
     const prompt = buildCodexPrompt({ ...job, messages: [] }, [], []);
     const instructions = prompt.split("<current_request>")[0] ?? "";
 
-    expect(instructions.length).toBeLessThan(8_000);
+    // 上游的 8000 是為上游的功能集訂的。這個部署另外加了表格渲染
+    // embed 篇幅規則 冷處理與玩笑校準四塊指示 所以有意識地放寬到 8400
+    // 再高就該回頭壓縮而不是繼續調這個數字 每 1000 字元約 300 token
+    // 而且是每一次請求都要付
+    expect(instructions.length).toBeLessThan(8_400);
     expect(prompt).not.toContain("<available_reactions_json>");
     expect(prompt).not.toContain("<extracted_attachments>");
     expect(prompt).not.toContain("<ignored_attachments>");
