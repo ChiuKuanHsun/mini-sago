@@ -1,0 +1,8 @@
+{
+      # 想收憑證到期通知就填 email，留著註解也可以
+      email kuanhsunextension@gmail.com
+}
+
+kuanhsun.dpdns.org {
+      reverse_proxy core:3000
+}

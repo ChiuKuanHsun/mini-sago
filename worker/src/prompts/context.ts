@@ -25,7 +25,7 @@ function addressingReferences(request: string) {
   return {
     directSelfReferences: uniqueMatches(
       request,
-      /你|妳|您|迷你西米露|MiniSago|Sago|\byou(?:r|rs|rself)?\b/giu,
+      /你|妳|您|中野二乃|二乃|Nino|\byou(?:r|rs|rself)?\b/giu,
     ),
     possibleSelfReferences: uniqueMatches(
       request,
@@ -118,7 +118,7 @@ export function requestContext(
   if (job.addressingMode) {
     sections.push(
       block("conversation_addressing_json", {
-        addressee: job.developerTask ? "Codex" : "MiniSago (迷你西米露)",
+        addressee: job.developerTask ? "Codex" : "中野二乃 (Nino)",
         mode: job.addressingMode,
         ...addressingReferences(request),
       }),

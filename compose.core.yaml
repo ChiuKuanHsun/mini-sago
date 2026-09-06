@@ -1,0 +1,41 @@
+services:
+  core:
+    image: minisago-core:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minisago-core
+    restart: unless-stopped
+    init: true
+    env_file: .env.production
+    volumes:
+      - minisago-core-state:/app/state
+    networks:
+      minisago-edge:
+        aliases:
+          - core
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: minisago-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - minisago-edge
+    depends_on:
+      - core
+
+volumes:
+  minisago-core-state:
+  caddy-data:
+  caddy-config:
+
+networks:
+  minisago-edge:
+    name: minisago-edge

@@ -826,7 +826,7 @@ describe("Codex chatbot runner", () => {
           {
             id: "message-2",
             role: "assistant",
-            author: "迷你西米露",
+            author: "中野二乃",
             timestamp: "2026-08-08T11:06:40.698Z",
             content: "乾 這已經是直接把柏佑當 system prompt 啦",
             attachments: [],
@@ -838,7 +838,7 @@ describe("Codex chatbot runner", () => {
     );
 
     expect(prompt).toContain(
-      '<conversation_addressing_json>\n{"addressee":"MiniSago (迷你西米露)","mode":"continuation","directSelfReferences":[],"possibleSelfReferences":["她"]}',
+      '<conversation_addressing_json>\n{"addressee":"中野二乃 (Nino)","mode":"continuation","directSelfReferences":[],"possibleSelfReferences":["她"]}',
     );
     expect(prompt).toContain(
       "classify one as other only when supplied context names a specific antecedent",

@@ -109,5 +109,5 @@ export function missingDeveloperRepositoryResponse(
     availableRepositories.length > 0
       ? `\n目前可用的有 ${availableRepositories.map((value) => `\`${value}\``).join(" ")}`
       : "";
-  return `這題要碰程式碼 但我還不知道是哪個 GitHub repo${choices}\n告訴我是哪個 我就能繼續`;
+  return `這題要碰程式碼 但你沒說是哪個 GitHub repo${choices}\n講清楚我就繼續`;
 }

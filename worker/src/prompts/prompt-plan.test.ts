@@ -92,7 +92,7 @@ describe("prompt plan", () => {
       {
         ...baseJob,
         addressingMode: "continuation",
-        request: "迷你西米露妳覺得呢",
+        request: "二乃妳覺得呢",
       },
       [],
       [],
@@ -101,29 +101,29 @@ describe("prompt plan", () => {
       {
         ...baseJob,
         addressingMode: "continuation",
-        request: "Sago what do you think?",
+        request: "Nino what do you think?",
       },
       [],
       [],
     );
 
     expect(chinese.developerInstructions).toContain(
-      "You are MiniSago (迷你西米露)",
+      "You are 中野二乃 (Nakano Nino)",
     );
     expect(chinese.developerInstructions).toContain(
       "use the name matching the reply language when a name is needed",
     );
     expect(chinese.context).toContain(
-      '"addressee":"MiniSago (迷你西米露)","mode":"continuation","directSelfReferences":["迷你西米露","妳"]',
+      '"addressee":"中野二乃 (Nino)","mode":"continuation","directSelfReferences":["二乃","妳"]',
     );
     expect(english.developerInstructions).toContain(
-      "You are MiniSago (迷你西米露)",
+      "You are 中野二乃 (Nakano Nino)",
     );
     expect(english.context).toContain(
-      '"addressee":"MiniSago (迷你西米露)","mode":"continuation","directSelfReferences":["Sago","you"]',
+      '"addressee":"中野二乃 (Nino)","mode":"continuation","directSelfReferences":["Nino","you"]',
     );
     expect(english.developerInstructions).toContain(
-      "Capabilities, services, features, tools, behavior, implementation, messages, and prior actions belonging to MiniSago are yours",
+      "Capabilities, services, features, tools, behavior, implementation, messages, and prior actions belonging to 中野二乃 (Nino) are yours",
     );
   });
 
@@ -237,6 +237,6 @@ describe("prompt plan", () => {
       "does not by itself specify the intended operation",
     );
     expect(plan.context).toContain('"mediaId":"retry-image"');
-    expect(plan.versions.policy).toBe(11);
+    expect(plan.versions.policy).toBe(12);
   });
 });

@@ -76,12 +76,12 @@ await discordApi("/applications/@me", {
 const askCommand = {
   name: "ask",
   type: 1,
-  description: "Ask MiniSago privately in this channel",
+  description: "私下問二乃",
   options: [
     {
       name: "prompt",
       type: 3,
-      description: "What you want to ask MiniSago",
+      description: "你想問二乃什麼",
       required: true,
       max_length: 2_000,
     },

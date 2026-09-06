@@ -46,7 +46,7 @@ test("reports one terminal deployment result after restart", async () => {
     {
       path: "/channels/1282936453134815275/messages",
       body: {
-        content: "MiniSago deployed 0123456 successfully.",
+        content: "二乃 deployed 0123456 successfully.",
         allowed_mentions: { parse: [] },
       },
     },
