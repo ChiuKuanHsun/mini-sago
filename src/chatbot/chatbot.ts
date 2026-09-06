@@ -79,6 +79,7 @@ import {
   isChannelQuietRequest,
   isChannelWakeRequest,
 } from "../discord/channel-quiet";
+import { MemberMuteTracker } from "../discord/member-mute";
 import type {
   FeatureAvailabilityMutation,
   FeatureAvailabilityStore,
@@ -1228,6 +1229,7 @@ export async function handleChatbotMention({
   reactionBroker,
   conversationTracker,
   quietTracker,
+  memberMuteTracker,
   receivedSequence,
   invocation,
   featureAvailability,
@@ -1239,6 +1241,7 @@ export async function handleChatbotMention({
   reactionBroker?: DiscordReactionBroker;
   conversationTracker?: ChatbotConversationTracker;
   quietTracker?: ChannelQuietTracker;
+  memberMuteTracker?: MemberMuteTracker;
   receivedSequence?: number;
   invocation?: ChatbotInvocation;
   featureAvailability?: FeatureAvailabilityStore;
@@ -1277,6 +1280,22 @@ export async function handleChatbotMention({
   }
   if (request === null) {
     return false;
+  }
+
+  // 被 owner 冷處理的成員只拿得到罐頭回覆，不會佔用 worker 也不吃 Codex 額度。
+  if (
+    memberMuteTracker &&
+    message.guild_id &&
+    requesterUserId &&
+    requesterUserId !== accessConfig.ownerUserId &&
+    memberMuteTracker.isMuted(message.guild_id, requesterUserId)
+  ) {
+    const brushOff = memberMuteTracker.takeBrushOff(
+      message.guild_id,
+      requesterUserId,
+    );
+    if (brushOff) await respond(brushOff);
+    return true;
   }
 
   if (
@@ -1574,6 +1593,33 @@ export async function handleChatbotMention({
                   name: input.name,
                   discordRequest,
                 }),
+            }
+          : {}),
+        ...(requesterUserId === accessConfig.ownerUserId &&
+        memberMuteTracker &&
+        message.guild_id
+          ? {
+              muteMember: async (input: {
+                userId: string;
+                durationMinutes?: number;
+              }) => {
+                await discordRequest(
+                  `/guilds/${message.guild_id}/members/${input.userId}`,
+                );
+                return memberMuteTracker.mute(
+                  message.guild_id!,
+                  input.userId,
+                  input.durationMinutes,
+                );
+              },
+              releaseMember: async (input: { userId: string }) => ({
+                released: memberMuteTracker.release(
+                  message.guild_id!,
+                  input.userId,
+                ),
+              }),
+              listMutedMembers: () =>
+                memberMuteTracker.list(message.guild_id!),
             }
           : {}),
         ...(requesterUserId === accessConfig.ownerUserId && featureAvailability

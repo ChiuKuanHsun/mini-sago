@@ -24,6 +24,7 @@ import {
   type DiscordApplicationCommandInteraction,
 } from "./interactions";
 import { ChannelQuietTracker } from "./channel-quiet";
+import { MemberMuteTracker } from "./member-mute";
 import { transcribeSpeech } from "./local-speech";
 import {
   getChatbotAccessConfig,
@@ -229,6 +230,7 @@ class InstagramGatewayClient implements VoiceGateway {
   private channelTasks = new ChannelTaskQueue();
   private conversations = new ChatbotConversationTracker();
   private quietChannels = new ChannelQuietTracker();
+  private mutedMembers = new MemberMuteTracker();
   private quickReplyNudges = new QuickReplyNudgeTracker();
   private heartbeatAcked = true;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -669,6 +671,7 @@ class InstagramGatewayClient implements VoiceGateway {
           reactionBroker: this.reactionBroker,
           conversationTracker: this.conversations,
           quietTracker: this.quietChannels,
+          memberMuteTracker: this.mutedMembers,
           receivedSequence,
           featureAvailability: this.featureAvailability,
         });

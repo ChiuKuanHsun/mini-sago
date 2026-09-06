@@ -373,6 +373,12 @@ export type ChatbotMcpSessionHandlers = {
     pausedUntil: string;
     durationMinutes: number;
   };
+  muteMember?: (input: {
+    userId: string;
+    durationMinutes?: number;
+  }) => Promise<{ mutedUntil: string; durationMinutes: number }>;
+  releaseMember?: (input: { userId: string }) => Promise<{ released: boolean }>;
+  listMutedMembers?: () => Array<{ userId: string; mutedUntil: string }>;
   getCodexUsage?: () => Promise<CodexUsageSnapshot | null>;
   sendChannelMessage?: (input: {
     content: string;
@@ -556,6 +562,20 @@ function availableCapabilities(
       description:
         "Pause your replies and automatic activity in the current Discord thread or channel for a bounded time.",
       tools: ["pause_channel_activity"],
+    });
+  }
+  if (
+    handlers.muteMember &&
+    handlers.releaseMember &&
+    handlers.listMutedMembers
+  ) {
+    capabilities.push({
+      id: "member_brush_off",
+      category: "discord",
+      availability: "available",
+      description:
+        "At the owner's explicit request, stop answering one member in this server and let the host send a short canned brush-off instead, until the owner lets them off or the timer runs out.",
+      tools: ["mute_member", "release_member", "list_muted_members"],
     });
   }
   if (handlers.joinVoiceChannel && handlers.leaveVoiceChannel) {
@@ -772,6 +792,70 @@ function createServer(session: ChatbotMcpSession) {
           status: "complete",
           ...session.handlers.pauseChannelActivity!(durationMinutes),
           currentReply: "suppressed",
+        }),
+    );
+  }
+
+  if (session.handlers.muteMember) {
+    server.registerTool(
+      "mute_member",
+      {
+        description:
+          "Stop answering one member in this server; the host replies with a short canned brush-off instead. Call this whenever the owner asks you to ignore, stop replying to, or brush someone off, however casually they phrase it. Acknowledging the request without calling this tool leaves the member completely unaffected. Omit durationMinutes for the default.",
+        inputSchema: {
+          userId: z.string().regex(/^\d{17,20}$/u),
+          durationMinutes: z.number().int().min(1).max(1_440).optional(),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async ({ userId, durationMinutes }) =>
+        toolResult({
+          status: "complete",
+          ...(await session.handlers.muteMember!({ userId, durationMinutes })),
+        }),
+    );
+  }
+
+  if (session.handlers.releaseMember) {
+    server.registerTool(
+      "release_member",
+      {
+        description:
+          "Start answering a previously ignored member again. Call this whenever the owner lets someone off, forgives them, or asks you to reply to them again. Acknowledging without calling this tool leaves them ignored.",
+        inputSchema: { userId: z.string().regex(/^\d{17,20}$/u) },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async ({ userId }) =>
+        toolResult({
+          status: "complete",
+          ...(await session.handlers.releaseMember!({ userId })),
+        }),
+    );
+  }
+
+  if (session.handlers.listMutedMembers) {
+    server.registerTool(
+      "list_muted_members",
+      {
+        description:
+          "List the members currently ignored in this server and when each mute expires.",
+        inputSchema: {},
+        annotations: readAnnotations,
+      },
+      async () =>
+        toolResult({
+          status: "complete",
+          members: session.handlers.listMutedMembers!(),
         }),
     );
   }
