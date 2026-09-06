@@ -336,15 +336,15 @@ describe("Codex chatbot runner", () => {
     );
   });
 
-  test("uses Luna for chat and routing, then Sol medium for owner dev work", () => {
+  test("uses Luna everywhere, high effort for chat and owner dev work", () => {
     expect(CHATBOT_MODEL_VERBOSITY).toBe("medium");
     expect(COMMUNITY_CHATBOT_PROFILE).toEqual({
       model: "gpt-5.6-luna",
       reasoningEffort: "high",
     });
     expect(OWNER_CHATBOT_PROFILE).toEqual({
-      model: "gpt-5.6-sol",
-      reasoningEffort: "medium",
+      model: "gpt-5.6-luna",
+      reasoningEffort: "high",
     });
     expect(VOICE_CHATBOT_PROFILE).toEqual({
       model: "gpt-5.6-luna",
