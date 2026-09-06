@@ -19,6 +19,7 @@ import {
   executeChatbotAnswerDecision,
   executionRouteOrChat,
   developerThreadName,
+  developerTraceBody,
   formatDiscordAnswer,
   formatDiscordAnswers,
   getNearbyHumanMessages,
@@ -2096,4 +2097,23 @@ describe("Discord chatbot", () => {
     expect(formatDiscordAnswer(longAnswer)).toHaveLength(2_000);
     expect(formatDiscordAnswer(longAnswer).endsWith("…")).toBe(true);
   });
+});
+
+test("renders developer progress as one checklist with the newest step active", () => {
+  const body = developerTraceBody("Working · owner/repo", [
+    "Analyzing branch naming",
+    "Evaluating branchless PR creation",
+  ]);
+  expect(body).toBe(
+    "**Working · owner/repo**\n\n✓ Analyzing branch naming\n▸ Evaluating branchless PR creation",
+  );
+});
+
+test("collapses older developer progress steps beyond the visible window", () => {
+  const lines = Array.from({ length: 11 }, (_, index) => `step ${index + 1}`);
+  const body = developerTraceBody("Working · owner/repo", lines);
+  expect(body).toContain("_…and 3 earlier steps_");
+  expect(body).not.toContain("✓ step 3");
+  expect(body).toContain("✓ step 4");
+  expect(body).toContain("▸ step 11");
 });

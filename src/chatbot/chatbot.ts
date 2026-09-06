@@ -109,6 +109,9 @@ const DISCORD_MESSAGE_LIMIT = 2_000;
 const TYPING_REFRESH_MS = 8_000;
 const ACTIVE_CONVERSATION_TTL_MS = 300_000;
 const DEVELOPER_TASK_TTL_MS = 3 * 24 * 60 * 60_000;
+const TRACE_EDIT_INTERVAL_MS = 2_000;
+const TRACE_VISIBLE_LINES = 8;
+const TRACE_LINE_MAX_CHARACTERS = 160;
 const guildMemoryStore = getGuildMemoryStore();
 const serviceSubscriptionStore = getServiceSubscriptionStore();
 
@@ -582,13 +585,36 @@ type DeveloperTask = {
   activeJobId?: string;
   nextRequest?: string;
   requiresAddressing?: boolean;
-  traceMessageIds: string[];
+  traceMessageId?: string;
+  traceLines: string[];
+  traceTimer?: ReturnType<typeof setTimeout>;
+  traceFlushQueued?: boolean;
   messageQueue: Promise<void>;
   cleanupTimer?: ReturnType<typeof setTimeout>;
   revokeMcp: () => void;
   extendMcp: () => void;
   discordRequest: DiscordRequest;
 };
+
+export function developerTraceBody(header: string, lines: string[]) {
+  const visible = lines.slice(-TRACE_VISIBLE_LINES);
+  const hidden = lines.length - visible.length;
+  const rows = visible.map((line, index) => {
+    const text = line
+      .trim()
+      .replace(/\s+/gu, " ")
+      .slice(0, TRACE_LINE_MAX_CHARACTERS);
+    return `${index === visible.length - 1 ? "▸" : "✓"} ${text}`;
+  });
+  return [
+    `**${header}**`,
+    "",
+    ...(hidden > 0
+      ? [`_…and ${hidden} earlier step${hidden === 1 ? "" : "s"}_`]
+      : []),
+    ...rows,
+  ].join("\n");
+}
 
 export function developerThreadName(title?: string) {
   return title?.replace(/\s+/gu, " ").trim().slice(0, 100) || "Coding task";
@@ -828,52 +854,94 @@ class DeveloperTaskRegistry {
     task.cleanupTimer.unref?.();
   }
 
+  private stateLabel(task: DeveloperTask) {
+    return task.state === "running"
+      ? "Working"
+      : task.state === "stopping"
+        ? "Stopping"
+        : task.state === "stopped"
+          ? "Stopped"
+          : task.state === "completed"
+            ? "Complete"
+            : "Failed";
+  }
+
   private status(task: DeveloperTask) {
-    const state =
-      task.state === "running"
-        ? "Working"
-        : task.state === "stopping"
-          ? "Stopping"
-          : task.state === "stopped"
-            ? "Stopped"
-            : task.state === "completed"
-              ? "Complete"
-              : "Failed";
-    return `**${state} · ${task.repository}**\n${task.summary}\n\nReply here to steer me. Say \`stop\` to pause or \`status\` for an update.`;
+    return `**${this.stateLabel(task)} · ${task.repository}**\n${task.summary}\n\nReply here to steer me. Say \`stop\` to pause or \`status\` for an update.`;
   }
 
   private postTrace(task: DeveloperTask, content: string) {
-    task.messageQueue = task.messageQueue
-      .then(async () => {
-        const message = await task.discordRequest<{ id: string }>(
-          `/channels/${task.threadId}/messages`,
-          {
-            method: "POST",
-            body: {
-              content: formatDiscordAnswer(content),
-              allowed_mentions: { parse: [] },
-            },
+    const line = content.trim();
+    if (!line) return;
+    task.traceLines.push(line);
+    if (task.traceTimer || task.traceFlushQueued) return;
+    if (!task.traceMessageId) {
+      task.traceFlushQueued = true;
+      task.messageQueue = task.messageQueue
+        .then(() => this.renderTrace(task))
+        .then(
+          () => {
+            task.traceFlushQueued = false;
+          },
+          () => {
+            task.traceFlushQueued = false;
           },
         );
-        task.traceMessageIds.push(message.id);
-      })
-      .catch(() => undefined);
+      return;
+    }
+    task.traceTimer = setTimeout(() => {
+      task.traceTimer = undefined;
+      task.messageQueue = task.messageQueue
+        .then(() => this.renderTrace(task))
+        .catch(() => undefined);
+    }, TRACE_EDIT_INTERVAL_MS);
+    task.traceTimer.unref?.();
+  }
+
+  private async renderTrace(task: DeveloperTask) {
+    if (!task.traceLines.length) return;
+    const content = formatDiscordAnswer(
+      developerTraceBody(
+        `${this.stateLabel(task)} · ${task.repository}`,
+        task.traceLines,
+      ),
+    );
+    const body = { content, allowed_mentions: { parse: [] } };
+    if (!task.traceMessageId) {
+      const message = await task.discordRequest<{ id: string }>(
+        `/channels/${task.threadId}/messages`,
+        { method: "POST", body },
+      );
+      task.traceMessageId = message.id;
+      return;
+    }
+    await task.discordRequest(
+      `/channels/${task.threadId}/messages/${task.traceMessageId}`,
+      { method: "PATCH", body },
+    );
   }
 
   private async settleTrace(task: DeveloperTask, removeMessages: boolean) {
+    if (task.traceTimer) {
+      clearTimeout(task.traceTimer);
+      task.traceTimer = undefined;
+    }
+    if (!removeMessages && task.traceLines.length) {
+      task.messageQueue = task.messageQueue
+        .then(() => this.renderTrace(task))
+        .catch(() => undefined);
+    }
     await task.messageQueue.catch(() => undefined);
     task.messageQueue = Promise.resolve();
-    const messageIds = task.traceMessageIds.splice(0);
-    if (!removeMessages) return;
-    await Promise.all(
-      messageIds.map((messageId) =>
-        task
-          .discordRequest(`/channels/${task.threadId}/messages/${messageId}`, {
-            method: "DELETE",
-          })
-          .catch(() => undefined),
-      ),
-    );
+    const messageId = task.traceMessageId;
+    task.traceMessageId = undefined;
+    task.traceLines = [];
+    if (!removeMessages || !messageId) return;
+    await task
+      .discordRequest(`/channels/${task.threadId}/messages/${messageId}`, {
+        method: "DELETE",
+      })
+      .catch(() => undefined);
   }
 
   private async finishWithoutAnswer(task: DeveloperTask, content: string) {
@@ -1623,7 +1691,7 @@ export async function handleChatbotMention({
           workflow,
           state: "running",
           summary: "Preparing an isolated workspace.",
-          traceMessageIds: [],
+          traceLines: [],
           messageQueue: Promise.resolve(),
           revokeMcp: () => mcpSession?.revoke(),
           extendMcp: () => mcpSession?.extend(DEVELOPER_TASK_TTL_MS),
