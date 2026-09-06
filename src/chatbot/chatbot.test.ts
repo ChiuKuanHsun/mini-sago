@@ -64,12 +64,14 @@ async function waitFor<T>(value: () => T | undefined): Promise<T> {
 describe("Discord chatbot", () => {
   test("keeps worker failures short and actionable", () => {
     expect(chatbotFailureReply("unavailable")).toBe(
-      "我現在暫時忙不過來 稍後再試一次",
+      "我現在忙不過來 又不是不理你 晚點再來",
     );
     expect(chatbotFailureReply("timeout")).toBe(
-      "我沒等到操作結果 先確認一下再重試",
+      "等半天沒等到結果 你先自己確認一下再叫我",
     );
-    expect(chatbotFailureReply("internal")).toBe("我這次沒完成 稍後再試一次");
+    expect(chatbotFailureReply("internal")).toBe(
+      "這次沒弄完啦 再叫我一次 不要一直催",
+    );
   });
 
   test("creates concise coding task thread names", () => {
@@ -813,7 +815,7 @@ describe("Discord chatbot", () => {
     expect(quietTracker.isPaused("channel-1")).toBe(false);
     expect(requests.at(-1)).toMatchObject({
       path: "/channels/channel-1/messages",
-      body: { content: "我現在沒接上工作機 晚點再叫我一次 💤" },
+      body: { content: "現在連不上工作機 我也沒辦法 晚點再叫我" },
     });
   });
 
@@ -842,11 +844,11 @@ describe("Discord chatbot", () => {
     ).toEqual({ reply: null });
   });
 
-  test("enforces first-person MiniSago identity before posting", () => {
+  test("enforces first-person identity before posting", () => {
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({
-          reply: "You mean MiniSago's globally available built-ins.",
+          reply: "You mean Nino's globally available built-ins.",
           reaction: null,
         }),
       ),
@@ -854,7 +856,7 @@ describe("Discord chatbot", () => {
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({
-          reply: "這些是迷你西米露的全域功能",
+          reply: "這些是二乃的全域功能",
           reaction: null,
         }),
       ),
@@ -862,7 +864,7 @@ describe("Discord chatbot", () => {
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({
-          reply: "MiniSago handles reminders.",
+          reply: "中野二乃 handles reminders.",
           reaction: null,
         }),
       ),
@@ -871,16 +873,16 @@ describe("Discord chatbot", () => {
       parseChatbotAnswerDecision(
         JSON.stringify({
           reply: enforceFirstPersonIdentity(
-            "<self-introduction>MiniSago</self-introduction> here, reporting in.",
+            "<self-introduction>中野二乃</self-introduction> here, reporting in.",
             false,
           ),
           reaction: null,
         }),
       ),
-    ).toEqual({ reply: "MiniSago here, reporting in." });
+    ).toEqual({ reply: "中野二乃 here, reporting in." });
     expect(
       parseChatbotAnswerDecision(
-        JSON.stringify({ reply: "I'm MiniSago.", reaction: null }),
+        JSON.stringify({ reply: "I'm 中野二乃.", reaction: null }),
       ),
     ).toEqual({ reply: null });
   });
@@ -1178,7 +1180,7 @@ describe("Discord chatbot", () => {
     expect(requests.at(-1)).toEqual({
       path: "/channels/channel-1/messages",
       body: {
-        content: "我現在沒接上工作機 晚點再叫我一次 💤",
+        content: "現在連不上工作機 我也沒辦法 晚點再叫我",
         allowed_mentions: { parse: [] },
       },
     });
@@ -1211,7 +1213,7 @@ describe("Discord chatbot", () => {
     expect(requests.at(-1)).toEqual({
       path: "/channels/channel-1/messages",
       body: {
-        content: "我現在沒接上工作機 晚點再叫我一次 💤",
+        content: "現在連不上工作機 我也沒辦法 晚點再叫我",
         allowed_mentions: { parse: [] },
       },
     });
@@ -1268,7 +1270,7 @@ describe("Discord chatbot", () => {
 
     expect(handled).toBe(true);
     expect(discordPaths).toEqual([]);
-    expect(responses).toEqual(["我現在沒接上工作機 晚點再叫我一次 💤"]);
+    expect(responses).toEqual(["現在連不上工作機 我也沒辦法 晚點再叫我"]);
   });
 
   test("gives unauthorized guild members a safe Chinese reply", async () => {
@@ -1302,7 +1304,7 @@ describe("Discord chatbot", () => {
       {
         path: "/channels/channel-1/messages",
         body: {
-          content: "在這個伺服器裡我暫時只聽 <@917446775873343600> 的 抱歉啦",
+          content: "這個伺服器裡我只聽 <@917446775873343600> 的 抱歉",
           allowed_mentions: { parse: [] },
         },
       },
@@ -1343,7 +1345,7 @@ describe("Discord chatbot", () => {
     expect(requests.at(-1)).toEqual({
       path: "/channels/channel-1/messages",
       body: {
-        content: "我現在沒接上工作機 晚點再叫我一次 💤",
+        content: "現在連不上工作機 我也沒辦法 晚點再叫我",
         allowed_mentions: { parse: [] },
       },
     });
@@ -1374,7 +1376,7 @@ describe("Discord chatbot", () => {
     expect(requests.at(-1)).toEqual({
       path: "/channels/dm-channel-1/messages",
       body: {
-        content: "我現在沒接上工作機 晚點再叫我一次 💤",
+        content: "現在連不上工作機 我也沒辦法 晚點再叫我",
         allowed_mentions: { parse: [] },
       },
     });
@@ -1712,7 +1714,7 @@ describe("Discord chatbot", () => {
 
   test("asks for a repository instead of dispatching an invalid dev job", () => {
     expect(missingDeveloperRepositoryResponse("oracle")).toBe(
-      "這題要碰程式碼 但我還不知道是哪個 GitHub repo\n告訴我是哪個 我就能繼續",
+      "這題要碰程式碼 但你沒說是哪個 GitHub repo\n講清楚我就繼續",
     );
     expect(
       missingDeveloperRepositoryResponse("oracle", undefined, [
@@ -1720,7 +1722,7 @@ describe("Discord chatbot", () => {
         "Kiwi/backend",
       ]),
     ).toBe(
-      "這題要碰程式碼 但我還不知道是哪個 GitHub repo\n目前可用的有 `sago-cream/mini-sago` `Kiwi/backend`\n告訴我是哪個 我就能繼續",
+      "這題要碰程式碼 但你沒說是哪個 GitHub repo\n目前可用的有 `sago-cream/mini-sago` `Kiwi/backend`\n講清楚我就繼續",
     );
     expect(
       missingDeveloperRepositoryResponse("oracle", "sago-cream/mini-sago"),
@@ -2089,7 +2091,7 @@ describe("Discord chatbot", () => {
 
   test("shortens answers to one Discord message", () => {
     expect(formatDiscordAnswer(" short answer ")).toBe("short answer");
-    expect(formatDiscordAnswer("   ")).toBe("我剛剛腦袋一片空白 再問我一次");
+    expect(formatDiscordAnswer("   ")).toBe("剛剛腦袋一片空白 再問一次 這次講清楚點");
     const longAnswer = "a".repeat(2_100);
     expect(formatDiscordAnswer(longAnswer)).toHaveLength(2_000);
     expect(formatDiscordAnswer(longAnswer).endsWith("…")).toBe(true);

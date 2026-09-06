@@ -107,19 +107,19 @@ export { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
 
 const DISCORD_MESSAGE_LIMIT = 2_000;
 const TYPING_REFRESH_MS = 8_000;
-const ACTIVE_CONVERSATION_TTL_MS = 90_000;
+const ACTIVE_CONVERSATION_TTL_MS = 300_000;
 const DEVELOPER_TASK_TTL_MS = 3 * 24 * 60 * 60_000;
 const guildMemoryStore = getGuildMemoryStore();
 const serviceSubscriptionStore = getServiceSubscriptionStore();
 
 export function chatbotFailureReply(kind: ChatbotFailureKind) {
   if (kind === "unavailable") {
-    return "我現在暫時忙不過來 稍後再試一次";
+    return "我現在忙不過來 又不是不理你 晚點再來";
   }
   if (kind === "timeout") {
-    return "我沒等到操作結果 先確認一下再重試";
+    return "等半天沒等到結果 你先自己確認一下再叫我";
   }
-  return "我這次沒完成 稍後再試一次";
+  return "這次沒弄完啦 再叫我一次 不要一直催";
 }
 
 export function supplementalCapabilities({
@@ -427,7 +427,7 @@ function normalizeDiscordAnswer(content: string) {
   const normalized = content.trim();
 
   if (!normalized) {
-    return "我剛剛腦袋一片空白 再問我一次";
+    return "剛剛腦袋一片空白 再問一次 這次講清楚點";
   }
 
   return normalized;
@@ -1048,7 +1048,7 @@ export async function handleChatbotMention({
       return false;
     }
 
-    const content = `在這個伺服器裡我暫時只聽 <@${accessConfig.ownerUserId}> 的 抱歉啦`;
+    const content = `這個伺服器裡我只聽 <@${accessConfig.ownerUserId}> 的 抱歉`;
     await respond(content);
     return true;
   }
@@ -1067,13 +1067,13 @@ export async function handleChatbotMention({
   const acquired = macAgentBridge.acquireWorkflow();
 
   if (acquired.status === "offline") {
-    const content = "我現在沒接上工作機 晚點再叫我一次 💤";
+    const content = "現在連不上工作機 我也沒辦法 晚點再叫我";
     await respond(content);
     return true;
   }
 
   if (acquired.status === "busy") {
-    const content = "我正在幫別人做事 等我一下下";
+    const content = "在忙別人的事 等一下 別催";
     await respond(content);
     return true;
   }
@@ -1688,10 +1688,10 @@ export async function handleChatbotMention({
   }
 
   if (mcpSnapshot.searchUnavailable && reply) {
-    reply = `我剛剛翻不到伺服器的舊訊息 這次回答可能不太完整\n\n${reply}`;
+    reply = `翻不到舊訊息 所以這次可能不太完整 不要怪我\n\n${reply}`;
   }
   if (!reply && !reacted && files.length === 0) {
-    reply = "我剛剛卡住了 晚點再叫我一次";
+    reply = "剛剛卡住了 晚點再叫我 不要連按";
   }
   if (reply || files.length > 0) {
     const content = reply ? formatDiscordAnswers(reply) : null;

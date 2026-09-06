@@ -69,8 +69,8 @@ export async function sendDeploymentNotificationIfNeeded(
   const shortCommit = status.commit.slice(0, 7);
   const content =
     status.status === "complete"
-      ? `MiniSago deployed ${shortCommit} successfully.`
-      : `MiniSago deployment ${shortCommit} failed with exit code ${status.exitCode ?? "unknown"}.`;
+      ? `二乃 deployed ${shortCommit} successfully.`
+      : `二乃 deployment ${shortCommit} failed with exit code ${status.exitCode ?? "unknown"}.`;
   await options.discordRequest(`/channels/${status.channelId}/messages`, {
     method: "POST",
     body: { content, allowed_mentions: { parse: [] } },

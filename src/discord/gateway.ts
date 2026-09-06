@@ -54,7 +54,7 @@ import { getFeatureAvailabilityStore } from "./feature-availability";
 
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const MESSAGE_CONTENT_LIMIT = 2_000;
-const SOCIAL_WEBHOOK_NAME = "MiniSago Social Links";
+const SOCIAL_WEBHOOK_NAME = "二乃 Social Links";
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const GUILDS_INTENT = 1 << 0;
 const GUILD_VOICE_STATES_INTENT = 1 << 7;
@@ -482,7 +482,7 @@ class InstagramGatewayClient implements VoiceGateway {
     })
       .then(async (handled) => {
         if (!handled) {
-          await respond("我剛剛卡住了 晚點再叫我一次");
+          await respond("剛剛卡住了 晚點再叫我 不要連按");
         }
       })
       .catch(async (error) => {
@@ -491,7 +491,7 @@ class InstagramGatewayClient implements VoiceGateway {
           error,
         );
         if (!responseAttempted) {
-          await respond("我剛剛卡住了 晚點再叫我一次").catch(() => undefined);
+          await respond("剛剛卡住了 晚點再叫我 不要連按").catch(() => undefined);
         }
       });
   }
@@ -560,7 +560,7 @@ class InstagramGatewayClient implements VoiceGateway {
             {
               name: "Custom Status",
               type: 4,
-              state: "標我才會讀訊息",
+              state: "才不是在等你標我",
             },
           ],
           status: "online",
@@ -741,7 +741,7 @@ class InstagramGatewayClient implements VoiceGateway {
       try {
         await this.replyToMessage(
           message,
-          "這則訊息裡的社群連結太多了 我一次回不完",
+          "這則訊息連結也太多了吧 我一次弄不完",
         );
       } catch (error) {
         console.error(
