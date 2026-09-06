@@ -33,7 +33,10 @@ import type {
   AnswerJob,
   OracleAnswerJob,
 } from "../../contracts/worker-contract";
-import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
+import {
+  parseChatbotAnswerDecision,
+  type ChatbotEmbed,
+} from "../../contracts/answer-contract";
 
 import {
   DiscordReactionBroker,
@@ -320,7 +323,11 @@ export async function executeChatbotAnswerDecision({
       console.warn("Discord mention reaction failed.");
     }
   }
-  return { reply: decision.reply, reacted };
+  return {
+    reply: decision.reply,
+    reacted,
+    ...(decision.embed ? { embed: decision.embed } : {}),
+  };
 }
 
 export type ChatbotMention = DiscordMessage;
@@ -334,6 +341,7 @@ export type ChatbotInvocation = {
   respond?: (
     content: string | string[] | null,
     files?: ChatbotOutgoingFile[],
+    embed?: ChatbotEmbed,
   ) => Promise<void>;
 };
 
@@ -426,6 +434,141 @@ export function isChatbotAuthorized(
   );
 }
 
+const TABLE_CODE_BLOCK_MAX_WIDTH = 45;
+
+function isWideCodePoint(code: number) {
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0x303e) ||
+    (code >= 0x3041 && code <= 0x33ff) ||
+    (code >= 0x3400 && code <= 0x4dbf) ||
+    (code >= 0x4e00 && code <= 0x9fff) ||
+    (code >= 0xa000 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x1f300 && code <= 0x1f9ff) ||
+    (code >= 0x20000 && code <= 0x3fffd)
+  );
+}
+
+export function discordDisplayWidth(text: string) {
+  let width = 0;
+  for (const character of text) {
+    width += isWideCodePoint(character.codePointAt(0) ?? 0) ? 2 : 1;
+  }
+  return width;
+}
+
+function padCell(text: string, width: number) {
+  return text + " ".repeat(Math.max(0, width - discordDisplayWidth(text)));
+}
+
+function tableCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/u, "")
+    .replace(/\|$/u, "")
+    .split(/(?<!\\)\|/u)
+    .map((cell) => cell.replace(/\\\|/gu, "|").trim());
+}
+
+function isTableRow(line: string) {
+  return line.includes("|") && line.trim().length > 0;
+}
+
+function isTableDelimiter(line: string) {
+  if (!isTableRow(line)) return false;
+  const cells = tableCells(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/u.test(cell));
+}
+
+function plainCell(cell: string) {
+  return cell.replace(/\*\*|__|`/gu, "");
+}
+
+function renderTableRows(rows: string[][]) {
+  const header = rows[0];
+  if (!header) return "";
+  const body = rows.slice(1);
+  const widths = header.map((_, column) =>
+    Math.max(
+      ...rows.map((row) => discordDisplayWidth(plainCell(row[column] ?? ""))),
+    ),
+  );
+  const total =
+    widths.reduce((sum, width) => sum + width, 0) + 2 * (header.length - 1);
+
+  if (total <= TABLE_CODE_BLOCK_MAX_WIDTH) {
+    const lines = rows.map((row) =>
+      row
+        .map((cell, column) => padCell(plainCell(cell ?? ""), widths[column] ?? 0))
+        .join("  ")
+        .trimEnd(),
+    );
+    return ["\u0060\u0060\u0060", ...lines, "\u0060\u0060\u0060"].join("\n");
+  }
+
+  if (header.length < 2 || body.length === 0) {
+    return body.map((row) => `- ${row.filter(Boolean).join(" — ")}`).join("\n");
+  }
+
+  const labels = header.slice(1);
+  return body
+    .map((row) =>
+      [
+        `**${row[0] ?? ""}**`,
+        ...labels.map((label, index) => `- ${label} — ${row[index + 1] ?? ""}`),
+      ].join("\n"),
+    )
+    .join("\n\n");
+}
+
+export function renderDiscordTables(content: string) {
+  const lines = content.split("\n");
+  const output: string[] = [];
+  let fence: string | undefined;
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const marker = line.trim().match(/^(\u0060{3,}|~{3,})/u)?.[1];
+    if (marker) {
+      if (!fence) fence = marker[0];
+      else if (marker[0] === fence) fence = undefined;
+      output.push(line);
+      index += 1;
+      continue;
+    }
+
+    if (!fence && isTableRow(line) && isTableDelimiter(lines[index + 1] ?? "")) {
+      const header = tableCells(line);
+      const rows: string[][] = [header];
+      let cursor = index + 2;
+      while (cursor < lines.length && isTableRow(lines[cursor] ?? "")) {
+        const cells = tableCells(lines[cursor] ?? "");
+        rows.push(
+          Array.from(
+            { length: header.length },
+            (_, column) => cells[column] ?? "",
+          ),
+        );
+        cursor += 1;
+      }
+      output.push(renderTableRows(rows));
+      index = cursor;
+      continue;
+    }
+
+    output.push(line);
+    index += 1;
+  }
+
+  return output.join("\n");
+}
+
 function normalizeDiscordAnswer(content: string) {
   const normalized = content.trim();
 
@@ -433,7 +576,7 @@ function normalizeDiscordAnswer(content: string) {
     return "剛剛腦袋一片空白 再問一次 這次講清楚點";
   }
 
-  return normalized;
+  return renderDiscordTables(normalized);
 }
 
 function limitDiscordMessage(content: string) {
@@ -500,9 +643,38 @@ export function formatDiscordAnswers(content: string) {
     .filter(Boolean);
 }
 
-function replyBody(message: DiscordMessage, content: string | null) {
+const EMBED_COLOR = 0xe06c86;
+
+function discordEmbeds(embed?: ChatbotEmbed) {
+  if (!embed) return {};
+  return {
+    embeds: [
+      {
+        color: EMBED_COLOR,
+        ...(embed.title ? { title: embed.title } : {}),
+        ...(embed.description ? { description: embed.description } : {}),
+        ...(embed.fields?.length
+          ? {
+              fields: embed.fields.map((field) => ({
+                name: field.name,
+                value: field.value,
+                inline: false,
+              })),
+            }
+          : {}),
+      },
+    ],
+  };
+}
+
+function replyBody(
+  message: DiscordMessage,
+  content: string | null,
+  embed?: ChatbotEmbed,
+) {
   return {
     ...(content ? { content } : {}),
+    ...discordEmbeds(embed),
     message_reference: {
       message_id: message.id,
       fail_if_not_exists: false,
@@ -514,9 +686,10 @@ function replyBody(message: DiscordMessage, content: string | null) {
   };
 }
 
-function channelMessageBody(content: string | null) {
+function channelMessageBody(content: string | null, embed?: ChatbotEmbed) {
   return {
     ...(content ? { content } : {}),
+    ...discordEmbeds(embed),
     allowed_mentions: {
       parse: [],
     },
@@ -528,6 +701,7 @@ export async function postChatbotResponse(
   content: string | string[] | null,
   discordRequest: DiscordRequest,
   files: ChatbotOutgoingFile[] = [],
+  embed?: ChatbotEmbed,
 ) {
   const contents = Array.isArray(content) ? content : [content];
   let canPostDirectly = false;
@@ -542,10 +716,11 @@ export async function postChatbotResponse(
   }
 
   for (const [index, content] of contents.entries()) {
+    const messageEmbed = index === 0 ? embed : undefined;
     const body =
       canPostDirectly || index > 0
-        ? channelMessageBody(content)
-        : replyBody(message, content);
+        ? channelMessageBody(content, messageEmbed)
+        : replyBody(message, content, messageEmbed);
     const uploadFiles = index === 0 ? files : [];
     const formData =
       uploadFiles.length > 0
@@ -1072,10 +1247,11 @@ export async function handleChatbotMention({
   const respond = (
     content: string | string[] | null,
     files: ChatbotOutgoingFile[] = [],
+    embed?: ChatbotEmbed,
   ) =>
     invocation?.respond
-      ? invocation.respond(content, files)
-      : postChatbotResponse(message, content, discordRequest, files);
+      ? invocation.respond(content, files, embed)
+      : postChatbotResponse(message, content, discordRequest, files, embed);
 
   if (!requesterUserId || requesterUserId === botUserId || message.webhook_id) {
     return false;
@@ -1740,6 +1916,7 @@ export async function handleChatbotMention({
   if (quietTracker?.isPaused(message.channel_id)) return true;
   let reacted = false;
   let reply: string | null = null;
+  let embed: ChatbotEmbed | undefined;
   const files = result.ok ? (result.files ?? []) : [];
   if (result.ok) {
     const decision = await executeChatbotAnswerDecision({
@@ -1751,6 +1928,7 @@ export async function handleChatbotMention({
     });
     reply = decision.reply;
     reacted ||= decision.reacted;
+    embed = decision.embed;
   } else {
     reply = chatbotFailureReply(result.failureKind);
   }
@@ -1758,12 +1936,12 @@ export async function handleChatbotMention({
   if (mcpSnapshot.searchUnavailable && reply) {
     reply = `翻不到舊訊息 所以這次可能不太完整 不要怪我\n\n${reply}`;
   }
-  if (!reply && !reacted && files.length === 0) {
+  if (!reply && !reacted && files.length === 0 && !embed) {
     reply = "剛剛卡住了 晚點再叫我 不要連按";
   }
-  if (reply || files.length > 0) {
+  if (reply || files.length > 0 || embed) {
     const content = reply ? formatDiscordAnswers(reply) : null;
-    await respond(content, files);
+    await respond(content, files, embed);
     if (!invocation) {
       conversationTracker?.activate(message.channel_id, requesterUserId);
     }

@@ -1,9 +1,18 @@
 services:
   worker:
+    # Codex 的 Bubblewrap sandbox 需要在容器內建立 user namespace 並掛載。
+    # Docker 預設 seccomp 擋掉 unshare(CLONE_NEWUSER)，docker-default 的
+    # AppArmor 擋掉 mount，兩者都要放寬。上游 production 是用自訂 seccomp
+    # 加專屬 AppArmor profile 達成同樣效果，但那兩份設定沒有隨 repo 附上。
+    # cap_drop: ALL 不可行 —— entrypoint 需要 CAP_CHOWN/CAP_SETUID
+    # 才能整理 volume 權限並 setpriv 降權到 bun（已實測會失敗）。
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     environment:
-      GIT_AUTHOR_NAME: MiniKuanHsun
+      GIT_AUTHOR_NAME: 二乃
       GIT_AUTHOR_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
-      GIT_COMMITTER_NAME: MiniKuanHsun
+      GIT_COMMITTER_NAME: 二乃
       GIT_COMMITTER_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
     networks:
       default:

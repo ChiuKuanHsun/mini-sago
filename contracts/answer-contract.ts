@@ -1,9 +1,22 @@
 export const CHATBOT_REPLY_MAX_CHARACTERS = 1_900;
 export const CHATBOT_REACTION_MAX_CHARACTERS = 100;
+export const CHATBOT_EMBED_TITLE_MAX_CHARACTERS = 256;
+export const CHATBOT_EMBED_DESCRIPTION_MAX_CHARACTERS = 1_000;
+export const CHATBOT_EMBED_FIELD_NAME_MAX_CHARACTERS = 64;
+export const CHATBOT_EMBED_FIELD_VALUE_MAX_CHARACTERS = 300;
+export const CHATBOT_EMBED_MAX_FIELDS = 6;
+
+export type ChatbotEmbedField = { name: string; value: string };
+export type ChatbotEmbed = {
+  title?: string;
+  description?: string;
+  fields?: ChatbotEmbedField[];
+};
 
 export type ChatbotAnswerDecision = {
   reply: string | null;
   reactionEmoji?: string;
+  embed?: ChatbotEmbed;
 };
 
 const SELF_NAME = /\bNino\b|中野二乃|二乃/u;
@@ -33,6 +46,57 @@ export function enforceFirstPersonIdentity(
     : normalized;
 }
 
+function embedText(value: unknown, limit: number) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const safe = enforceFirstPersonIdentity(trimmed);
+  if (safe === null) return null;
+  return safe.slice(0, limit);
+}
+
+export function parseChatbotEmbed(value: unknown): ChatbotEmbed | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const source = value as {
+    title?: unknown;
+    description?: unknown;
+    fields?: unknown;
+  };
+  const title = embedText(source.title, CHATBOT_EMBED_TITLE_MAX_CHARACTERS);
+  const description = embedText(
+    source.description,
+    CHATBOT_EMBED_DESCRIPTION_MAX_CHARACTERS,
+  );
+  if (title === null || description === null) return undefined;
+
+  const fields: ChatbotEmbedField[] = [];
+  if (Array.isArray(source.fields)) {
+    for (const entry of source.fields.slice(0, CHATBOT_EMBED_MAX_FIELDS)) {
+      if (!entry || typeof entry !== "object") continue;
+      const field = entry as { name?: unknown; value?: unknown };
+      const name = embedText(
+        field.name,
+        CHATBOT_EMBED_FIELD_NAME_MAX_CHARACTERS,
+      );
+      const fieldValue = embedText(
+        field.value,
+        CHATBOT_EMBED_FIELD_VALUE_MAX_CHARACTERS,
+      );
+      if (!name || !fieldValue) return undefined;
+      fields.push({ name, value: fieldValue });
+    }
+  }
+
+  if (!title && !description && fields.length === 0) return undefined;
+  return {
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(fields.length ? { fields } : {}),
+  };
+}
+
 export function parseChatbotAnswerDecision(
   content: string,
 ): ChatbotAnswerDecision {
@@ -40,6 +104,7 @@ export function parseChatbotAnswerDecision(
     const value = JSON.parse(content) as {
       reply?: unknown;
       reaction?: unknown;
+      embed?: unknown;
     };
     const reply =
       typeof value.reply === "string"
@@ -64,9 +129,11 @@ export function parseChatbotAnswerDecision(
     ) {
       return { reply: null };
     }
+    const embed = parseChatbotEmbed(value.embed);
     return {
       reply: safeReply || null,
       ...(reaction ? { reactionEmoji: reaction } : {}),
+      ...(embed ? { embed } : {}),
     };
   } catch {
     return { reply: null };
