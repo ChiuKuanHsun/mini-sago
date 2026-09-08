@@ -885,7 +885,7 @@ describe("Codex chatbot runner", () => {
     // 模型滑回預設 assistant 人格 而這個 prompt 以前一個範例都沒有。
     // 擁有者已明確表示長度可以放寬 但每 1000 字元約 300 token 且每次請求
     // 都要付 加東西前先確認它真的對應到一個實際發生過的失敗案例。
-    expect(instructions.length).toBeLessThan(10_000);
+    expect(instructions.length).toBeLessThan(11_000);
     expect(prompt).not.toContain("<available_reactions_json>");
     expect(prompt).not.toContain("<extracted_attachments>");
     expect(prompt).not.toContain("<ignored_attachments>");
