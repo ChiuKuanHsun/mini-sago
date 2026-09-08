@@ -18,6 +18,11 @@ export type DiscordApplicationCommandInteraction = {
       type?: number;
       name?: string;
       value?: unknown;
+      options?: Array<{
+        type?: number;
+        name?: string;
+        value?: unknown;
+      }>;
     }>;
   };
   member?: {
