@@ -3,6 +3,7 @@ import type { Server, ServerWebSocket } from "bun";
 
 import {
   CHATBOT_JOB_TIMEOUT_MS,
+  CHATBOT_ANSWER_JOB_TIMEOUT_MS,
   CHATBOT_DEV_JOB_TIMEOUT_MS,
   CHATBOT_PROTOCOL_VERSION,
   type ChatbotFailureKind,
@@ -250,6 +251,13 @@ function validTaskProgress(value: unknown): value is ChatbotTaskProgress {
 
 function repositoryKey(repository: string) {
   return repository.toLocaleLowerCase("en-US");
+}
+
+export function jobTimeoutMs(job: ChatbotJob) {
+  if (job.purpose !== "answer") return CHATBOT_JOB_TIMEOUT_MS;
+  return job.executionRoute === "oracle"
+    ? CHATBOT_DEV_JOB_TIMEOUT_MS
+    : CHATBOT_ANSWER_JOB_TIMEOUT_MS;
 }
 
 function supports(worker: Worker, capabilities: ChatbotWorkerCapability[]) {
@@ -621,10 +629,7 @@ export class MacAgentBridge {
     }
 
     const result = new Promise<MacAgentJobResult>((resolve) => {
-      const timeoutMs =
-        job.executionRoute === "oracle" && job.purpose === "answer"
-          ? CHATBOT_DEV_JOB_TIMEOUT_MS
-          : CHATBOT_JOB_TIMEOUT_MS;
+      const timeoutMs = jobTimeoutMs(job);
       const timer = setTimeout(() => {
         const pendingJob = this.pendingJobs.get(job.id);
         if (!pendingJob) return;
