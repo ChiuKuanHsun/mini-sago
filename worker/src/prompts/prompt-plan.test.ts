@@ -239,7 +239,18 @@ describe("prompt plan", () => {
       "does not by itself specify the intended operation",
     );
     expect(plan.context).toContain('"mediaId":"retry-image"');
-    expect(plan.versions.policy).toBe(14);
+    expect(plan.versions.policy).toBe(15);
+  });
+
+  test("presents the worked examples as a range, not a script", () => {
+    // 回歸守衛：每個情境只給一句台詞時 模型會把它當標準答案照抄
+    // 使用者實測發現問她是不是 AI 每次都回同一句。
+    const plan = buildPromptPlan(baseJob, [], []);
+
+    expect(plan.developerInstructions).toContain(
+      "write a fresh line every time",
+    );
+    expect(plan.developerInstructions).not.toContain("Match their register");
   });
 
   test("anchors her voice at the very end of the chat context", () => {
