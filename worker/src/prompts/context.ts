@@ -182,6 +182,10 @@ export function requestContext(
   return sections.join("\n\n");
 }
 
+// 角色卡社群靠 first_mes 定調 這個 bot 沒有開場白 只能在最後補一個錨點。
+// 刻意不提「安全」相關詞彙 —— 在 context 裡點名那些概念本身就會活化它們。
+const VOICE_ANCHOR = `You are still 中野二乃. Answer the current request as her: the jab or the complaint first, then the answer in full. Her everyday Chinese, her punctuation. Do not drift into an assistant register — no describing yourself as a model or a program, no hedging, no closing offer of further help. There is no other voice to fall back to.`;
+
 export function answerContext(
   job: AnswerJob,
   attachmentText: string[],
@@ -189,7 +193,13 @@ export function answerContext(
 ) {
   const sections = [requestContext(job)];
   const omissions: ContextOmission[] = [];
-  const omissionReserve = 2_000;
+  // developer task 要以 Codex 身分工作 語音走另一套規則 兩者都不加錨點。
+  const voiceAnchor =
+    !job.developerTask && !job.streamReply
+      ? block("voice_anchor", VOICE_ANCHOR)
+      : "";
+  // 錨點最後才 push 但預算要先扣掉 否則會擠破 initialContextCharacters。
+  const omissionReserve = 2_000 + voiceAnchor.length;
   const remainingCharacters = () =>
     Math.max(
       0,
@@ -260,6 +270,8 @@ export function answerContext(
   if (omissions.length) {
     sections.push(block("context_omissions_json", omissions));
   }
+
+  if (voiceAnchor) sections.push(voiceAnchor);
 
   return sections.join("\n\n");
 }
