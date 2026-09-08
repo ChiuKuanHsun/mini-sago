@@ -15,10 +15,14 @@ services:
       - seccomp=unconfined
       - apparmor=unconfined
     environment:
+      # 人格文字改成從掛載進來的檔案讀 調語氣不必重建 image。
+      MINISAGO_PROMPT_OVERRIDES_DIR: /etc/minisago/prompts
       GIT_AUTHOR_NAME: 二乃
       GIT_AUTHOR_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
       GIT_COMMITTER_NAME: 二乃
       GIT_COMMITTER_EMAIL: 108409184+ChiuKuanHsun@users.noreply.github.com
+    volumes:
+      - ./prompts-local:/etc/minisago/prompts:ro
     networks:
       default:
       sandbox-internal:
