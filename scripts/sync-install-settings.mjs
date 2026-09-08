@@ -229,8 +229,13 @@ inviteUrl.searchParams.set("permissions", guildInstallPermissions);
 inviteUrl.searchParams.set("integration_type", DISCORD_GUILD_INSTALL);
 
 console.log("Updated Discord Guild Install default settings.");
+const registeredNames = commandTargets
+  .flatMap(({ commands }) => commands.map((command) => `/${command.name}`))
+  .join(" ");
 console.log(
-  `Registered /ask ${guildId ? `for guild ${guildId}` : "globally"}.`,
+  `Registered ${registeredNames} ${
+    guildId ? `for guild ${guildId}` : "globally"
+  }.`,
 );
 console.log(`Scopes: ${guildInstallScopes.join(", ")}`);
 console.log(`Permissions: ${guildInstallPermissions} (${permissionNames})`);
