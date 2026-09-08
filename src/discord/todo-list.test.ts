@@ -10,8 +10,9 @@ let stateFile: string;
 let clock: Date;
 let posted: Todo[];
 let notices: Array<{ id: string; kind: TodoNoticeKind }>;
-let deleted: Array<string | undefined>;
+let deleted: string[];
 let messageCounter: number;
+let noticeCounter: number;
 
 function makeList(overrides: Partial<ConstructorParameters<typeof TodoList>[0]> = {}) {
   return new TodoList({
@@ -24,9 +25,14 @@ function makeList(overrides: Partial<ConstructorParameters<typeof TodoList>[0]> 
     },
     postNotice: async (todo, kind) => {
       notices.push({ id: todo.id, kind });
+      noticeCounter += 1;
+      return `notice-${noticeCounter}`;
     },
-    deleteTodoMessage: async (todo) => {
-      deleted.push(todo.messageId);
+    deleteTodoMessages: async (todo) => {
+      deleted.push(
+        ...(todo.messageId ? [todo.messageId] : []),
+        ...(todo.noticeMessageIds ?? []),
+      );
     },
     ...overrides,
   });
@@ -40,6 +46,7 @@ beforeEach(async () => {
   notices = [];
   deleted = [];
   messageCounter = 0;
+  noticeCounter = 0;
 });
 
 afterEach(async () => {
@@ -178,6 +185,48 @@ describe("todo list", () => {
     await list.tick();
     await list.tick();
     expect(notices.map((notice) => notice.kind)).toEqual(["lead", "due"]);
+  });
+
+  test("打勾會把提醒訊息一起收掉", async () => {
+    const list = makeList();
+    const todo = await list.add({
+      content: "交報告",
+      dueAt: "2026-09-08T02:00:00.000Z",
+      leadMinutes: 30,
+    });
+
+    // 提前提醒的窗口在到期那一刻就關了 所以要分兩次。
+    clock = new Date("2026-09-08T01:35:00.000Z");
+    await list.tick();
+    clock = new Date("2026-09-08T02:00:00.000Z");
+    await list.tick();
+    expect(notices.map((notice) => notice.kind)).toEqual(["lead", "due"]);
+    expect((await list.list())[0]?.noticeMessageIds).toEqual([
+      "notice-1",
+      "notice-2",
+    ]);
+
+    await list.complete(todo.id);
+    // 待辦本體加上兩則提醒 一個都不留。
+    expect(deleted).toEqual(["message-1", "notice-1", "notice-2"]);
+  });
+
+  test("重複待辦下一輪不會扛著上一輪的提醒", async () => {
+    const list = makeList();
+    const todo = await list.add({
+      content: "倒垃圾",
+      cron: "0 20 * * 1",
+      timezone: "Asia/Taipei",
+    });
+
+    clock = new Date("2026-09-14T12:00:00.000Z");
+    await list.tick();
+    expect((await list.list())[0]?.noticeMessageIds).toEqual(["notice-1"]);
+
+    await list.complete(todo.id);
+    expect(deleted).toEqual(["message-1", "notice-1"]);
+    const [remaining] = await list.list();
+    expect(remaining?.noticeMessageIds).toBeUndefined();
   });
 
   test("改了排程就重新開放提醒", async () => {

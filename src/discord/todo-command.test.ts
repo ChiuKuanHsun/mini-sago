@@ -51,8 +51,8 @@ beforeEach(async () => {
       messageCounter += 1;
       return `message-${messageCounter}`;
     },
-    postNotice: async () => {},
-    deleteTodoMessage: async (todo: Todo) => {
+    postNotice: async () => undefined,
+    deleteTodoMessages: async (todo: Todo) => {
       deleted.push(todo.messageId);
     },
   });

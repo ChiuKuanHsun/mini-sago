@@ -36,6 +36,8 @@ export type Todo = {
   leadNotifiedFor?: string;
   /** 已經為哪一個 nextDueAt 發過到期提醒。 */
   dueNotifiedFor?: string;
+  /** 這一輪貼出去的提醒訊息。待辦被刪或打勾時要一起收掉 不然會留下孤兒。 */
+  noticeMessageIds?: string[];
 };
 
 type TodoState = {
@@ -49,10 +51,13 @@ type TodoListOptions = {
   stateFile: string;
   /** 貼一則新的待辦訊息 回傳 message ID。 */
   postTodoMessage: (todo: Todo) => Promise<string | undefined>;
-  /** 到期或提前提醒 應該回覆到待辦自己的訊息上。 */
-  postNotice: (todo: Todo, kind: TodoNoticeKind) => Promise<void>;
-  /** 刪掉待辦目前的訊息。 */
-  deleteTodoMessage: (todo: Todo) => Promise<void>;
+  /** 到期或提前提醒 應該回覆到待辦自己的訊息上 回傳 message ID。 */
+  postNotice: (
+    todo: Todo,
+    kind: TodoNoticeKind,
+  ) => Promise<string | undefined>;
+  /** 刪掉這筆待辦名下的所有訊息 本體加上它的提醒。 */
+  deleteTodoMessages: (todo: Todo) => Promise<void>;
   now?: () => Date;
   schedule?: (
     task: () => void,
@@ -136,7 +141,10 @@ function isTodo(value: unknown): value is Todo {
     optionalString(todo.nextDueAt) &&
     optionalString(todo.leadNotifiedFor) &&
     optionalString(todo.dueNotifiedFor) &&
-    (todo.leadMinutes === undefined || Number.isInteger(todo.leadMinutes))
+    (todo.leadMinutes === undefined || Number.isInteger(todo.leadMinutes)) &&
+    (todo.noticeMessageIds === undefined ||
+      (Array.isArray(todo.noticeMessageIds) &&
+        todo.noticeMessageIds.every((id) => typeof id === "string")))
   );
 }
 
@@ -298,7 +306,7 @@ export class TodoList {
       await this.load();
       const todo = this.todos.find((item) => item.id === todoId);
       if (!todo) throw new Error("That todo is not on the list.");
-      await this.options.deleteTodoMessage(todo);
+      await this.options.deleteTodoMessages(todo);
 
       if (!todo.cron) {
         this.todos = this.todos.filter((item) => item.id !== todoId);
@@ -314,6 +322,7 @@ export class TodoList {
       delete next.messageId;
       delete next.leadNotifiedFor;
       delete next.dueNotifiedFor;
+      delete next.noticeMessageIds;
       this.todos = this.todos.map((item) =>
         item.id === todoId ? next : item,
       );
@@ -328,7 +337,7 @@ export class TodoList {
       await this.load();
       const todo = this.todos.find((item) => item.id === todoId);
       if (!todo) throw new Error("That todo is not on the list.");
-      await this.options.deleteTodoMessage(todo);
+      await this.options.deleteTodoMessages(todo);
       this.todos = this.todos.filter((item) => item.id !== todoId);
       await this.write();
       return { ...todo };
@@ -386,13 +395,19 @@ export class TodoList {
       now.getTime() >= dueTime - todo.leadMinutes * 60_000 &&
       now.getTime() < dueTime
     ) {
-      await this.options.postNotice(todo, "lead");
+      const noticeId = await this.options.postNotice(todo, "lead");
+      if (noticeId) {
+        todo.noticeMessageIds = [...(todo.noticeMessageIds ?? []), noticeId];
+      }
       todo.leadNotifiedFor = todo.nextDueAt;
       changed = true;
     }
 
     if (todo.dueNotifiedFor !== todo.nextDueAt && now.getTime() >= dueTime) {
-      await this.options.postNotice(todo, "due");
+      const noticeId = await this.options.postNotice(todo, "due");
+      if (noticeId) {
+        todo.noticeMessageIds = [...(todo.noticeMessageIds ?? []), noticeId];
+      }
       todo.dueNotifiedFor = todo.nextDueAt;
       changed = true;
     }
@@ -443,7 +458,7 @@ let todoList: TodoList | undefined;
 
 export type TodoRuntimeCallbacks = Pick<
   TodoListOptions,
-  "postTodoMessage" | "postNotice" | "deleteTodoMessage"
+  "postTodoMessage" | "postNotice" | "deleteTodoMessages"
 >;
 
 export function configureTodoList(callbacks: TodoRuntimeCallbacks) {

@@ -164,28 +164,44 @@ if (reminderBotToken && todoChannelId && todoOwnerUserId) {
       return message.id;
     },
     postNotice: async (todo: Todo, kind) => {
-      await discordRequest(`/channels/${todoChannelId}/messages`, {
+      const notice = await discordRequest<{ id: string }>(
+        `/channels/${todoChannelId}/messages`,
+        {
         method: "POST",
-        body: {
-          content: `<@${todoOwnerUserId}> ${renderTodoNotice(todo, kind)}`,
-          allowed_mentions: ownerMention,
-          ...(todo.messageId
-            ? {
-                message_reference: {
-                  message_id: todo.messageId,
-                  fail_if_not_exists: false,
-                },
-              }
-            : {}),
+          body: {
+            content: `<@${todoOwnerUserId}> ${renderTodoNotice(todo, kind)}`,
+            allowed_mentions: ownerMention,
+            ...(todo.messageId
+              ? {
+                  message_reference: {
+                    message_id: todo.messageId,
+                    fail_if_not_exists: false,
+                  },
+                }
+              : {}),
+          },
         },
-      });
-    },
-    deleteTodoMessage: async (todo: Todo) => {
-      if (!todo.messageId) return;
-      await discordRequest(
-        `/channels/${todoChannelId}/messages/${todo.messageId}`,
-        { method: "DELETE" },
       );
+      return notice.id;
+    },
+    deleteTodoMessages: async (todo: Todo) => {
+      // 提醒是回覆在待辦訊息底下的 待辦收掉時它們也要跟著走
+      // 不然頻道裡會留下指向已刪訊息的孤兒。
+      const messageIds = [
+        ...(todo.messageId ? [todo.messageId] : []),
+        ...(todo.noticeMessageIds ?? []),
+      ];
+      for (const messageId of messageIds) {
+        try {
+          await discordRequest(
+            `/channels/${todoChannelId}/messages/${messageId}`,
+            { method: "DELETE" },
+          );
+        } catch (error) {
+          // 有人手動刪過就會 404。少刪一則不該擋住整筆待辦收掉。
+          console.warn(`Failed to delete todo message ${messageId}:`, error);
+        }
+      }
     },
   });
 } else if (!todoChannelId) {
