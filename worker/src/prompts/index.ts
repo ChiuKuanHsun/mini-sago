@@ -36,7 +36,7 @@ export { SOCIAL_ACTION_OUTPUT_SCHEMA } from "./social-action";
 export const PROMPT_PLAN_VERSIONS = {
   policy: 14,
   task: 3,
-  context: 9,
+  context: 10,
 } as const;
 
 export type PromptPlan = {
