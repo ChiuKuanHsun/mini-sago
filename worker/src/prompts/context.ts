@@ -46,10 +46,35 @@ function promptAttachment({
   };
 }
 
-function promptMessage(message: ChatbotMessage): Record<string, unknown> {
+function aliasKeys(message: Pick<ChatbotMessage, "author" | "authorAliases">) {
+  return [message.author, ...(message.authorAliases ?? [])]
+    .filter((name): name is string => Boolean(name))
+    .map((name) => name.toLocaleLowerCase());
+}
+
+function requesterAliasKeys(job: CodexJob) {
+  const message = job.requestMessage;
+  return new Set(message ? aliasKeys(message) : []);
+}
+
+function authorRole(
+  message: ChatbotMessage,
+  requesterAliases: ReadonlySet<string>,
+) {
+  if (message.role === "assistant") return "self";
+  return aliasKeys(message).some((name) => requesterAliases.has(name))
+    ? "requester"
+    : "other";
+}
+
+function promptMessage(
+  message: ChatbotMessage,
+  requesterAliases: ReadonlySet<string> = new Set<string>(),
+): Record<string, unknown> {
   return {
     ...(message.role ? { role: message.role } : {}),
     author: message.role === "assistant" ? "self" : message.author,
+    authorRole: authorRole(message, requesterAliases),
     ...(message.role !== "assistant" && message.authorAliases?.length
       ? { authorAliases: message.authorAliases }
       : {}),
@@ -62,7 +87,12 @@ function promptMessage(message: ChatbotMessage): Record<string, unknown> {
     ...(message.channelName ? { channelName: message.channelName } : {}),
     ...(message.jumpUrl ? { jumpUrl: message.jumpUrl } : {}),
     ...(message.referencedMessage
-      ? { referencedMessage: promptMessage(message.referencedMessage) }
+      ? {
+          referencedMessage: promptMessage(
+            message.referencedMessage,
+            requesterAliases,
+          ),
+        }
       : {}),
   };
 }
@@ -73,6 +103,7 @@ function requestMessageContext(job: CodexJob) {
 
   return {
     author: message.author,
+    authorRole: "requester",
     timestamp: message.timestamp,
     ...(message.authorAliases?.length
       ? { authorAliases: message.authorAliases }
@@ -102,6 +133,7 @@ export function requestContext(
     });
   }
   const sections = [block("current_request", request)];
+  const requesterAliases = requesterAliasKeys(job);
   const currentMessage = requestMessageContext(job);
 
   if (currentMessage) {
@@ -111,7 +143,7 @@ export function requestContext(
     sections.push(
       block(
         "replied_to_message_json",
-        promptMessage(job.requestMessage.referencedMessage),
+        promptMessage(job.requestMessage.referencedMessage, requesterAliases),
       ),
     );
   }
@@ -137,7 +169,14 @@ export function requestContext(
 
   const budgeted = budgetMessages(job.messages);
   if (budgeted.omission) omissions.push(budgeted.omission);
-  sections.push(block(messageBlock, budgeted.messages.map(promptMessage)));
+  sections.push(
+    block(
+      messageBlock,
+      budgeted.messages.map((message) =>
+        promptMessage(message, requesterAliases),
+      ),
+    ),
+  );
   if (omissions.length)
     sections.push(block("context_omissions_json", omissions));
   return sections.join("\n\n");

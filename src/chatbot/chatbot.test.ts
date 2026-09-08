@@ -34,6 +34,7 @@ import {
   parseExecutionRoute,
   parsePreviousTraceLookup,
   postChatbotResponse,
+  stripSearchCitations,
   searchGuildMessages,
   supplementalCapabilities,
   toChatbotMessage,
@@ -2243,4 +2244,16 @@ test("leaves tables inside code fences and bare pipes untouched", () => {
   ].join("\n");
   expect(formatDiscordAnswer(fenced)).toBe(fenced);
   expect(formatDiscordAnswer("a | b\nc | d")).toBe("a | b\nc | d");
+});
+
+test("strips leaked web search citation markers", () => {
+  expect(
+    stripSearchCitations("腹痛值得評估 citeturn0search0turn0search1"),
+  ).toBe("腹痛值得評估");
+  expect(stripSearchCitations("前面 \ue200 中間 \ue201 後面")).toBe(
+    "前面  中間  後面",
+  );
+  expect(stripSearchCitations("I cite my sources properly")).toBe(
+    "I cite my sources properly",
+  );
 });

@@ -879,7 +879,14 @@ describe("Codex chatbot runner", () => {
     const prompt = buildCodexPrompt({ ...job, messages: [] }, [], []);
     const instructions = prompt.split("<current_request>")[0] ?? "";
 
-    expect(instructions.length).toBeLessThan(8_000);
+    // 上游的 8000 是為上游的功能集訂的。這個部署另外加了表格渲染
+    // embed 篇幅規則 冷處理與玩笑校準四塊指示 所以先放寬到 8400
+    // 8700 是為了指涉歸屬那段 它是「誤答成別人的事」這個 bug 的正解
+    // 壓到塞得進 8400 就得砍掉例子和「兩個都符合就問一句」的收尾 那段就不會發動
+    // 另一條路是改寫上游 1500 字元的 reference resolution 但那段跟身分守衛
+    // 和人設糾纏最深 為了 300 字元去動它不划算
+    // 下次再要加就真的該壓縮了 每 1000 字元約 300 token 而且每次請求都要付
+    expect(instructions.length).toBeLessThan(8_700);
     expect(prompt).not.toContain("<available_reactions_json>");
     expect(prompt).not.toContain("<extracted_attachments>");
     expect(prompt).not.toContain("<ignored_attachments>");
