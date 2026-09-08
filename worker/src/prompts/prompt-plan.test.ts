@@ -237,7 +237,7 @@ describe("prompt plan", () => {
       "does not by itself specify the intended operation",
     );
     expect(plan.context).toContain('"mediaId":"retry-image"');
-    expect(plan.versions.policy).toBe(13);
+    expect(plan.versions.policy).toBe(14);
   });
 
   test("marks who is asking so one member's thing is not answered as another's", () => {

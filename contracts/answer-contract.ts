@@ -21,8 +21,16 @@ export type ChatbotAnswerDecision = {
 
 const SELF_NAME = /\bNino\b|中野二乃|二乃/u;
 const SELF_INTRODUCTION =
-  /<self-introduction>(中野二乃|二乃|Nino)<\/self-introduction>/gu;
+  /<self-introduction>\s*(中野\s*二乃|二乃|Nakano\s+Nino|Nino)\s*<\/self-introduction>/giu;
 const SELF_INTRODUCTION_MARKER = /<\/?self-introduction>/u;
+const SELF_INTRODUCTION_MARKERS = /<\/?self-introduction>/gu;
+
+// 「我是二乃」本來就是合法的第一人稱介紹 模型只是忘了包 marker。
+// 主動補上而不是讓整則回覆消失 —— 這是自我介紹會被系統擋掉的主因。
+const BARE_SELF_INTRODUCTION_ZH =
+  /(我(?:就)?是|我叫|叫我|我的名字是)(\s*)(中野\s*二乃|二乃|Nakano\s+Nino|Nino)/gu;
+const BARE_SELF_INTRODUCTION_EN =
+  /(\bI(?:'m|’m| am)|\bmy name is|\bcall me|\bthis is)(\s+)(中野\s*二乃|二乃|Nakano\s+Nino|Nino)/giu;
 
 export function enforceFirstPersonIdentity(
   reply: string,
@@ -36,7 +44,15 @@ export function enforceFirstPersonIdentity(
           ? "My"
           : "my",
     )
-    .replace(/中野二乃的|二乃的/gu, "我的");
+    .replace(/中野二乃的|二乃的/gu, "我的")
+    .replace(
+      BARE_SELF_INTRODUCTION_ZH,
+      "$1$2<self-introduction>$3</self-introduction>",
+    )
+    .replace(
+      BARE_SELF_INTRODUCTION_EN,
+      "$1$2<self-introduction>$3</self-introduction>",
+    );
   const unmarked = normalized.replace(SELF_INTRODUCTION, "");
   if (SELF_INTRODUCTION_MARKER.test(unmarked) || SELF_NAME.test(unmarked)) {
     return null;
@@ -112,7 +128,12 @@ export function parseChatbotAnswerDecision(
         : value.reply === null
           ? null
           : undefined;
-    const safeReply = reply ? enforceFirstPersonIdentity(reply) : reply;
+    // 守衛是風格檢查 不是安全檢查。送出一則語氣不完美的回覆
+    // 比讓整則回覆消失好 —— worker 那邊還有一次 repair 機會 這裡沒有。
+    const safeReply = reply
+      ? (enforceFirstPersonIdentity(reply) ??
+        reply.replace(SELF_INTRODUCTION_MARKERS, ""))
+      : reply;
     const reaction =
       value.reaction &&
       typeof value.reaction === "object" &&

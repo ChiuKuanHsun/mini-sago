@@ -863,6 +863,8 @@ describe("Discord chatbot", () => {
         }),
       ),
     ).toEqual({ reply: "這些是我的全域功能" });
+    // 守衛擋不下來的第三人稱自稱 現在照樣送出而不是讓回覆消失。
+    // worker 端的 repair 才是真正處理這種情況的地方 core 只能選送或不送。
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({
@@ -870,7 +872,7 @@ describe("Discord chatbot", () => {
           reaction: null,
         }),
       ),
-    ).toEqual({ reply: null });
+    ).toEqual({ reply: "中野二乃 handles reminders." });
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({
@@ -882,11 +884,31 @@ describe("Discord chatbot", () => {
         }),
       ),
     ).toEqual({ reply: "中野二乃 here, reporting in." });
+    // 忘了包 marker 的第一人稱自我介紹 host 端會自動補上 不再整則消失。
     expect(
       parseChatbotAnswerDecision(
         JSON.stringify({ reply: "I'm 中野二乃.", reaction: null }),
       ),
-    ).toEqual({ reply: null });
+    ).toEqual({ reply: "I'm 中野二乃." });
+    expect(
+      parseChatbotAnswerDecision(
+        JSON.stringify({ reply: "我是二乃 有事快問", reaction: null }),
+      ),
+    ).toEqual({ reply: "我是二乃 有事快問" });
+    expect(
+      parseChatbotAnswerDecision(
+        JSON.stringify({ reply: "叫我 Nino 就好", reaction: null }),
+      ),
+    ).toEqual({ reply: "叫我 Nino 就好" });
+    // marker 內有空白 或寫成 Nakano Nino 以前會讓整則回覆失敗
+    expect(
+      parseChatbotAnswerDecision(
+        JSON.stringify({
+          reply: "<self-introduction> Nakano Nino </self-introduction> here.",
+          reaction: null,
+        }),
+      ),
+    ).toEqual({ reply: "Nakano Nino here." });
   });
 
   test("binds a proposed mention reaction to the current message", async () => {
