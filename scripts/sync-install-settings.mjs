@@ -73,6 +73,110 @@ await discordApi("/applications/@me", {
   ),
 });
 
+const todoCommand = {
+  name: "todo",
+  type: 1,
+  description: "管代辦清單",
+  options: [
+    {
+      name: "add",
+      type: 1,
+      description: "加一筆到代辦頻道",
+      options: [
+        {
+          name: "content",
+          type: 3,
+          description: "要做什麼",
+          required: true,
+          max_length: 300,
+        },
+        {
+          name: "due",
+          type: 3,
+          description: "到期時間 例如 2026-09-10 18:00",
+          max_length: 40,
+        },
+        {
+          name: "repeat",
+          type: 3,
+          description: "重複 五段 cron 例如 0 20 * * 1",
+          max_length: 60,
+        },
+        {
+          name: "lead",
+          type: 4,
+          description: "提前幾分鐘先提醒一次",
+          min_value: 1,
+          max_value: 10080,
+        },
+      ],
+    },
+    { name: "list", type: 1, description: "看目前有哪些" },
+    {
+      name: "edit",
+      type: 1,
+      description: "改一筆",
+      options: [
+      {
+        name: "item",
+        type: 3,
+        description: "編號或內容片段",
+        required: true,
+        max_length: 300,
+      },
+        { name: "content", type: 3, description: "改成什麼", max_length: 300 },
+        { name: "due", type: 3, description: "到期時間", max_length: 40 },
+        { name: "repeat", type: 3, description: "重複 cron", max_length: 60 },
+        {
+          name: "lead",
+          type: 4,
+          description: "提前幾分鐘",
+          min_value: 1,
+          max_value: 10080,
+        },
+        {
+          name: "clear",
+          type: 3,
+          description: "清掉某個設定",
+          choices: [
+            { name: "到期時間", value: "due" },
+            { name: "重複", value: "repeat" },
+            { name: "提前提醒", value: "lead" },
+          ],
+        },
+      ],
+    },
+    {
+      name: "done",
+      type: 1,
+      description: "勾掉一筆",
+      options: [
+      {
+        name: "item",
+        type: 3,
+        description: "編號或內容片段",
+        required: true,
+        max_length: 300,
+      },
+      ],
+    },
+    {
+      name: "remove",
+      type: 1,
+      description: "不做了 直接丟掉",
+      options: [
+      {
+        name: "item",
+        type: 3,
+        description: "編號或內容片段",
+        required: true,
+        max_length: 300,
+      },
+      ],
+    },
+  ],
+};
+
 const askCommand = {
   name: "ask",
   type: 1,
@@ -93,13 +197,16 @@ const commandTargets = guildId
       { path: `/applications/${applicationId}/commands`, commands: [] },
       {
         path: `/applications/${applicationId}/guilds/${guildId}/commands`,
-        commands: [askCommand],
+        commands: [askCommand, todoCommand],
       },
     ]
   : [
       {
         path: `/applications/${applicationId}/commands`,
-        commands: [{ ...askCommand, contexts: [0], integration_types: [0] }],
+        commands: [
+          { ...askCommand, contexts: [0], integration_types: [0] },
+          { ...todoCommand, contexts: [0], integration_types: [0] },
+        ],
       },
     ];
 

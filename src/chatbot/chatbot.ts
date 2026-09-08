@@ -53,6 +53,7 @@ import {
   type ExpressionFetch,
 } from "../discord/api/emojis";
 import { getChatbotReminderScheduler } from "../discord/jobs/reminders";
+import { getTodoList, type Todo } from "../discord/todo-list";
 import { sendChannelMessage } from "../discord/api/channel-messages";
 import {
   joinMemberVoiceChannel,
@@ -1489,6 +1490,17 @@ export async function handleChatbotMention({
             });
           }
         : undefined;
+      const todos = getTodoList();
+      const todoSummary = (todo: Todo) => ({
+        id: todo.id,
+        content: todo.content,
+        ...(todo.nextDueAt ? { nextDueAt: todo.nextDueAt } : {}),
+        ...(todo.cron ? { cron: todo.cron } : {}),
+        ...(todo.timezone ? { timezone: todo.timezone } : {}),
+        ...(todo.leadMinutes !== undefined
+          ? { leadMinutes: todo.leadMinutes }
+          : {}),
+      });
       const reminderScheduler = getChatbotReminderScheduler();
       const tripPlanner = featureEnabled("trip_planner")
         ? createTripPlannerClient(process.env, `minisago-${message.id}`)
@@ -1715,6 +1727,24 @@ export async function handleChatbotMention({
                   entryId: result.entryId,
                 };
               },
+            }
+          : {}),
+        ...(todos && requesterUserId === accessConfig.ownerUserId
+          ? {
+              addTodo: async (input: Parameters<typeof todos.add>[0]) =>
+                todoSummary(await todos.add(input)),
+              listTodos: async () => (await todos.list()).map(todoSummary),
+              editTodo: async (input: Parameters<typeof todos.edit>[0]) =>
+                todoSummary(await todos.edit(input)),
+              completeTodo: async (todoId: string) => {
+                const result = await todos.complete(todoId);
+                return {
+                  recurring: result.recurring,
+                  todo: todoSummary(result.todo),
+                };
+              },
+              removeTodo: async (todoId: string) =>
+                todoSummary(await todos.remove(todoId)),
             }
           : {}),
         ...(reminderScheduler

@@ -27,6 +27,7 @@ import {
   type Reminder,
 } from "./discord/jobs/reminders";
 import { createDiscordRequest } from "./discord/api/request";
+import { configureTodoList, type Todo } from "./discord/todo-list";
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -92,6 +93,27 @@ function handleRequest(request: Request, server: Server<MacAgentSocketData>) {
   return new Response("找不到此頁面", { status: 404 });
 }
 
+function discordTimestamp(instant: string) {
+  return `<t:${Math.floor(Date.parse(instant) / 1000)}:R>`;
+}
+
+function renderTodoMessage(todo: Todo) {
+  const lines = [`📝 **${todo.content}**`];
+  if (todo.nextDueAt) {
+    lines.push(`⏰ ${discordTimestamp(todo.nextDueAt)}`);
+  }
+  if (todo.cron) {
+    lines.push(`🔁 \`${todo.cron}\`${todo.timezone ? ` (${todo.timezone})` : ""}`);
+  }
+  return lines.join("\n");
+}
+
+function renderTodoNotice(todo: Todo, kind: "lead" | "due") {
+  return kind === "lead"
+    ? `⏰ 「${todo.content}」還有 ${todo.leadMinutes} 分鐘`
+    : `⏰ 「${todo.content}」到期了`;
+}
+
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 getChatbotAccessConfig();
@@ -119,6 +141,68 @@ if (reminderBotToken) {
   });
 } else {
   console.warn("Reminder scheduler disabled: DISCORD_BOT_TOKEN is missing.");
+}
+
+const todoChannelId = process.env.MINISAGO_TODO_CHANNEL_ID?.trim();
+const todoOwnerUserId = process.env.MINISAGO_CHATBOT_OWNER_USER_ID?.trim();
+if (reminderBotToken && todoChannelId && todoOwnerUserId) {
+  const discordRequest = createDiscordRequest(reminderBotToken);
+  const ownerMention = {
+    parse: [] as string[],
+    users: [todoOwnerUserId],
+  };
+  configureTodoList({
+    postTodoMessage: async (todo: Todo) => {
+      const message = await discordRequest<{ id: string }>(
+        `/channels/${todoChannelId}/messages`,
+        {
+          method: "POST",
+          body: {
+            content: renderTodoMessage(todo),
+            allowed_mentions: { parse: [] },
+          },
+        },
+      );
+      // 先把勾加上去 打勾就少一個步驟。失敗不影響待辦本身。
+      try {
+        await discordRequest(
+          `/channels/${todoChannelId}/messages/${message.id}/reactions/${encodeURIComponent(
+            "✅",
+          )}/@me`,
+          { method: "PUT" },
+        );
+      } catch (error) {
+        console.warn(`Failed to pre-add the todo check mark:`, error);
+      }
+      return message.id;
+    },
+    postNotice: async (todo: Todo, kind) => {
+      await discordRequest(`/channels/${todoChannelId}/messages`, {
+        method: "POST",
+        body: {
+          content: `<@${todoOwnerUserId}> ${renderTodoNotice(todo, kind)}`,
+          allowed_mentions: ownerMention,
+          ...(todo.messageId
+            ? {
+                message_reference: {
+                  message_id: todo.messageId,
+                  fail_if_not_exists: false,
+                },
+              }
+            : {}),
+        },
+      });
+    },
+    deleteTodoMessage: async (todo: Todo) => {
+      if (!todo.messageId) return;
+      await discordRequest(
+        `/channels/${todoChannelId}/messages/${todo.messageId}`,
+        { method: "DELETE" },
+      );
+    },
+  });
+} else if (!todoChannelId) {
+  console.warn("Todo list disabled: MINISAGO_TODO_CHANNEL_ID is missing.");
 }
 
 if (process.env.DISCORD_GATEWAY_DISABLED !== "true") {

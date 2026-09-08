@@ -256,6 +256,15 @@ export type ChatbotGuildEmojiRenameInput = {
   guild?: string;
 };
 
+export type ChatbotTodo = {
+  id: string;
+  content: string;
+  nextDueAt?: string;
+  cron?: string;
+  timezone?: string;
+  leadMinutes?: number;
+};
+
 export type ChatbotMcpSessionHandlers = {
   mediaRegistry?: ChatbotMediaRegistry;
   supplementalCapabilities?: ChatbotCapability[];
@@ -369,6 +378,26 @@ export type ChatbotMcpSessionHandlers = {
     | undefined
   >;
   cancelReminder?: (reminderId: string) => Promise<boolean>;
+  addTodo?: (input: {
+    content: string;
+    dueAt?: string;
+    cron?: string;
+    timezone?: string;
+    leadMinutes?: number;
+  }) => Promise<ChatbotTodo>;
+  listTodos?: () => Promise<ChatbotTodo[]>;
+  editTodo?: (input: {
+    todoId: string;
+    content?: string;
+    dueAt?: string | null;
+    cron?: string | null;
+    timezone?: string;
+    leadMinutes?: number | null;
+  }) => Promise<ChatbotTodo>;
+  completeTodo?: (
+    todoId: string,
+  ) => Promise<{ recurring: boolean; todo: ChatbotTodo }>;
+  removeTodo?: (todoId: string) => Promise<ChatbotTodo>;
   pauseChannelActivity?: (durationMinutes?: number) => {
     pausedUntil: string;
     durationMinutes: number;
@@ -625,6 +654,29 @@ function availableCapabilities(
         "list_reminders",
         "edit_reminder",
         "cancel_reminder",
+      ],
+    });
+  }
+
+  if (
+    handlers.addTodo &&
+    handlers.listTodos &&
+    handlers.editTodo &&
+    handlers.completeTodo &&
+    handlers.removeTodo
+  ) {
+    capabilities.push({
+      id: "todos",
+      category: "reminders",
+      availability: "available",
+      description:
+        "Keep the owner's todo channel. Each item is one message there; the owner ticks the check mark to finish it. Items may carry a due time or a repeating cron, plus an optional lead-time nudge. Only the owner can change the list, and items always appear in the todo channel no matter where the request came from.",
+      tools: [
+        "add_todo",
+        "list_todos",
+        "edit_todo",
+        "complete_todo",
+        "remove_todo",
       ],
     });
   }
@@ -1009,6 +1061,151 @@ function createServer(session: ChatbotMcpSession) {
                 ? error.message
                 : "Could not update server memory.",
           });
+        }
+      },
+    );
+  }
+
+  if (
+    session.handlers.addTodo &&
+    session.handlers.listTodos &&
+    session.handlers.editTodo &&
+    session.handlers.completeTodo &&
+    session.handlers.removeTodo
+  ) {
+    const todoFailure = (error: unknown, fallback: string) =>
+      toolResult({
+        status: "invalid",
+        error: error instanceof Error ? error.message : fallback,
+      });
+
+    server.registerTool(
+      "add_todo",
+      {
+        description:
+          "Put one item on the owner's todo channel. The item appears as its own message in that channel wherever the request came from. Give dueAt as an ISO instant for a one-off, or cron for something repeating; never both. leadMinutes adds one earlier nudge. Only call when the owner asks for a todo, not for a plain reminder.",
+        inputSchema: {
+          content: z.string().trim().min(1).max(300),
+          dueAt: z.string().trim().min(1).optional(),
+          cron: z.string().trim().min(1).optional(),
+          timezone: z.string().trim().min(1).optional(),
+          leadMinutes: z.number().int().min(1).max(10080).optional(),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (input) => {
+        try {
+          return toolResult({
+            status: "complete",
+            todo: await session.handlers.addTodo!(input),
+          });
+        } catch (error) {
+          return todoFailure(error, "Could not add that todo.");
+        }
+      },
+    );
+
+    server.registerTool(
+      "list_todos",
+      {
+        description:
+          "Read every item currently on the owner's todo channel, with its ID, due time, and repeat. Call this before editing, finishing, or dropping an item so the right ID is used.",
+        inputSchema: {},
+        annotations: readAnnotations,
+      },
+      async () => {
+        try {
+          return toolResult({
+            status: "complete",
+            todos: await session.handlers.listTodos!(),
+          });
+        } catch (error) {
+          return todoFailure(error, "Could not read the todo list.");
+        }
+      },
+    );
+
+    server.registerTool(
+      "edit_todo",
+      {
+        description:
+          "Change one todo's wording or schedule. Pass null for dueAt, cron, or leadMinutes to clear it. Setting dueAt clears cron and setting cron clears dueAt. Get the ID from list_todos.",
+        inputSchema: {
+          todoId: z.string().trim().min(1),
+          content: z.string().trim().min(1).max(300).optional(),
+          dueAt: z.string().trim().min(1).nullable().optional(),
+          cron: z.string().trim().min(1).nullable().optional(),
+          timezone: z.string().trim().min(1).optional(),
+          leadMinutes: z.number().int().min(1).max(10080).nullable().optional(),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async (input) => {
+        try {
+          return toolResult({
+            status: "complete",
+            todo: await session.handlers.editTodo!(input),
+          });
+        } catch (error) {
+          return todoFailure(error, "Could not edit that todo.");
+        }
+      },
+    );
+
+    server.registerTool(
+      "complete_todo",
+      {
+        description:
+          "Mark one todo done, exactly as ticking its check mark would. A one-off item leaves the list; a repeating item only ends this round and returns with its next due time. Its channel message is removed either way.",
+        inputSchema: { todoId: z.string().trim().min(1) },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async ({ todoId }) => {
+        try {
+          const result = await session.handlers.completeTodo!(todoId);
+          return toolResult({ status: "complete", ...result });
+        } catch (error) {
+          return todoFailure(error, "Could not finish that todo.");
+        }
+      },
+    );
+
+    server.registerTool(
+      "remove_todo",
+      {
+        description:
+          "Drop one todo without finishing it, including repeating ones. Use when the owner says to cancel or delete an item rather than that it is done.",
+        inputSchema: { todoId: z.string().trim().min(1) },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async ({ todoId }) => {
+        try {
+          return toolResult({
+            status: "complete",
+            todo: await session.handlers.removeTodo!(todoId),
+          });
+        } catch (error) {
+          return todoFailure(error, "Could not drop that todo.");
         }
       },
     );
