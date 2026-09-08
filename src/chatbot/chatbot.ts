@@ -34,6 +34,7 @@ import type {
   OracleAnswerJob,
 } from "../../contracts/worker-contract";
 import {
+  CHATBOT_REPLY_MAX_CHARACTERS,
   parseChatbotAnswerDecision,
   type ChatbotEmbed,
 } from "../../contracts/answer-contract";
@@ -312,6 +313,11 @@ export async function executeChatbotAnswerDecision({
   discordRequest: DiscordRequest;
 }) {
   const decision = parseChatbotAnswerDecision(content);
+  if (decision.reply?.length === CHATBOT_REPLY_MAX_CHARACTERS) {
+    console.warn(
+      `Chatbot reply for message ${message.id} stopped at the ${CHATBOT_REPLY_MAX_CHARACTERS} character schema cap, so it is cut mid-sentence.`,
+    );
+  }
   let reacted = false;
   if (decision.reactionEmoji && reactionBroker && reactionCapabilities) {
     try {

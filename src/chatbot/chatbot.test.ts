@@ -4,7 +4,10 @@ import type { ServerWebSocket } from "bun";
 import type { ChatbotAccessConfig } from "./access";
 import { macAgentBridge, type MacAgentSocketData } from "./bridge";
 import { CHATBOT_PROTOCOL_VERSION } from "../../contracts/worker-contract";
-import { enforceFirstPersonIdentity } from "../../contracts/answer-contract";
+import {
+  CHATBOT_REPLY_MAX_CHARACTERS,
+  enforceFirstPersonIdentity,
+} from "../../contracts/answer-contract";
 import { ChatbotMediaRegistry } from "./media-assets";
 import { ChannelQuietTracker } from "../discord/channel-quiet";
 import type { FeatureAvailabilityStore } from "../discord/feature-availability";
@@ -841,7 +844,10 @@ describe("Discord chatbot", () => {
     });
     expect(
       parseChatbotAnswerDecision(
-        JSON.stringify({ reply: "x".repeat(1_901), reaction: null }),
+        JSON.stringify({
+          reply: "x".repeat(CHATBOT_REPLY_MAX_CHARACTERS + 1),
+          reaction: null,
+        }),
       ),
     ).toEqual({ reply: null });
   });
@@ -946,6 +952,38 @@ describe("Discord chatbot", () => {
       messageId: "mention-1",
       emoji: "sago:emoji-1",
     });
+  });
+
+  test("warns when a reply stopped at the schema character cap", async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(String(args[0]));
+    };
+
+    try {
+      const capped = "x".repeat(CHATBOT_REPLY_MAX_CHARACTERS);
+      const cut = await executeChatbotAnswerDecision({
+        content: JSON.stringify({ reply: capped, reaction: null }),
+        message: { id: "mention-cut", channel_id: "channel-1" },
+        discordRequest: async () => undefined as never,
+      });
+      const whole = await executeChatbotAnswerDecision({
+        content: JSON.stringify({
+          reply: "x".repeat(CHATBOT_REPLY_MAX_CHARACTERS - 1),
+          reaction: null,
+        }),
+        message: { id: "mention-whole", channel_id: "channel-1" },
+        discordRequest: async () => undefined as never,
+      });
+
+      expect(cut.reply).toBe(capped);
+      expect(whole.reply).toHaveLength(CHATBOT_REPLY_MAX_CHARACTERS - 1);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("mention-cut");
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   test("extracts a natural request from either Discord mention form", () => {
