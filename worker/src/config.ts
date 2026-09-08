@@ -24,6 +24,7 @@ export type MacAgentConfig = {
   mcpUrl: string;
   sandboxUrl: string;
   headless: boolean;
+  promptOverridesDirectory: string;
   sessionMonitorPath: string;
   skillbookRepository?: string;
   skillbookSyncIntervalMs: number;
@@ -301,6 +302,9 @@ export async function loadMacAgentConfig(
     sessionMonitorPath:
       process.env.MINISAGO_SESSION_MONITOR_PATH?.trim() ||
       join(defaultApplicationSupport, "bin", "session-monitor"),
+    promptOverridesDirectory:
+      process.env.MINISAGO_PROMPT_OVERRIDES_DIR?.trim() ||
+      join(defaultApplicationSupport, "prompts"),
     skillbookRepository: configuredSkillbookRepository(headless),
     skillbookSyncIntervalMs: Math.max(
       60_000,

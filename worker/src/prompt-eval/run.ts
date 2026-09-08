@@ -69,6 +69,8 @@ async function runCase(
 ): Promise<PromptCaseResult> {
   const caseRoot = join(runRoot, testCase.id);
   await mkdir(caseRoot, { recursive: true });
+  // 這裡刻意不載入 prompts/overrides。eval 量的是內建基準人格 這樣分數變動
+  // 才代表 prompt 本身改了 而不是有人剛好在調語氣。
   const plan = buildPromptPlan(testCase.job, testCase.attachmentText ?? [], []);
   const schema = outputSchemaForJob(testCase.job);
   if (!schema) throw new Error(`${testCase.id} has no output schema`);
