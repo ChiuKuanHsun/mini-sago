@@ -28,6 +28,8 @@ import {
 } from "./discord/jobs/reminders";
 import { createDiscordRequest } from "./discord/api/request";
 import { configureTodoList, type Todo } from "./discord/todo-list";
+import { todoEmbed } from "./discord/todo-command";
+import { EMBED_COLOR } from "./chatbot/chatbot";
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -93,21 +95,6 @@ function handleRequest(request: Request, server: Server<MacAgentSocketData>) {
   return new Response("找不到此頁面", { status: 404 });
 }
 
-function discordTimestamp(instant: string) {
-  return `<t:${Math.floor(Date.parse(instant) / 1000)}:R>`;
-}
-
-function renderTodoMessage(todo: Todo) {
-  const lines = [`📝 **${todo.content}**`];
-  if (todo.nextDueAt) {
-    lines.push(`⏰ ${discordTimestamp(todo.nextDueAt)}`);
-  }
-  if (todo.cron) {
-    lines.push(`🔁 \`${todo.cron}\`${todo.timezone ? ` (${todo.timezone})` : ""}`);
-  }
-  return lines.join("\n");
-}
-
 function renderTodoNotice(todo: Todo, kind: "lead" | "due") {
   return kind === "lead"
     ? `⏰ 「${todo.content}」還有 ${todo.leadMinutes} 分鐘`
@@ -158,7 +145,7 @@ if (reminderBotToken && todoChannelId && todoOwnerUserId) {
         {
           method: "POST",
           body: {
-            content: renderTodoMessage(todo),
+            embeds: [todoEmbed(todo, EMBED_COLOR)],
             allowed_mentions: { parse: [] },
           },
         },

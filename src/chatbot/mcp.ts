@@ -1083,7 +1083,7 @@ function createServer(session: ChatbotMcpSession) {
       "add_todo",
       {
         description:
-          "Put one item on the owner's todo channel. The item appears as its own message in that channel wherever the request came from. Give dueAt as an ISO instant for a one-off, or cron for something repeating; never both. leadMinutes adds one earlier nudge. Only call when the owner asks for a todo, not for a plain reminder.",
+          "Put one item on the owner's todo channel. The item appears as its own message in that channel wherever the request came from. dueAt is local wall-clock time as YYYY-MM-DD HH:MM in the owner's timezone, Asia/Taipei; a full ISO instant carrying an offset also works. Work out wording like 明天下午三點 or 下週一 from current_message_context_json.timestamp, which is UTC, then write the answer as Taipei wall-clock time. Use cron instead for something repeating; never both. leadMinutes adds one earlier nudge. Only call when the owner asks for a todo, not for a plain reminder.",
         inputSchema: {
           content: z.string().trim().min(1).max(300),
           dueAt: z.string().trim().min(1).optional(),
@@ -1134,7 +1134,7 @@ function createServer(session: ChatbotMcpSession) {
       "edit_todo",
       {
         description:
-          "Change one todo's wording or schedule. Pass null for dueAt, cron, or leadMinutes to clear it. Setting dueAt clears cron and setting cron clears dueAt. Get the ID from list_todos.",
+          "Change one todo's wording or schedule. dueAt takes the same local YYYY-MM-DD HH:MM in Asia/Taipei that add_todo does. Pass null for dueAt, cron, or leadMinutes to clear it. Setting dueAt clears cron and setting cron clears dueAt. Get the ID from list_todos.",
         inputSchema: {
           todoId: z.string().trim().min(1),
           content: z.string().trim().min(1).max(300).optional(),

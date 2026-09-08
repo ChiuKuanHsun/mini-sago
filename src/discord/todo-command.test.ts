@@ -5,11 +5,13 @@ import { join } from "node:path";
 
 import type { DiscordApplicationCommandInteraction } from "./interactions";
 import {
+  absoluteTime,
   parseDueTime,
   parseTodoCommand,
   resolveTodo,
   runTodoCommand,
   shortId,
+  todoEmbed,
 } from "./todo-command";
 import { TodoList, type Todo } from "./todo-list";
 
@@ -227,6 +229,73 @@ describe("runTodoCommand", () => {
   test("沒給編號會被念", async () => {
     await expect(runTodoCommand({ action: "done" }, list)).rejects.toThrow(
       "要給我編號",
+    );
+  });
+});
+
+describe("todoEmbed", () => {
+  const base = {
+    id: "aaaa1111-0000-0000-0000-000000000000",
+    content: "倒垃圾",
+    createdAt: "2026-09-08T00:00:00.000Z",
+  } as Todo;
+
+  test("時間用絕對格式 不是相對的", () => {
+    const embed = todoEmbed(
+      { ...base, nextDueAt: "2026-09-10T10:00:00.000Z" },
+      0x123456,
+    );
+    const due = embed.fields?.find((field) => field.name === "到期");
+    expect(due?.value).toBe("<t:1789034400:F>");
+    expect(due?.value).not.toContain(":R>");
+  });
+
+  test("短內容放標題 編號放頁尾", () => {
+    const embed = todoEmbed(base, 0x123456);
+    expect(embed.title).toBe("倒垃圾");
+    expect(embed.description).toBeUndefined();
+    expect(embed.footer.text).toBe("編號 aaaa1111");
+    expect(embed.color).toBe(0x123456);
+  });
+
+  test("超過標題上限就整段放 description 不截斷", () => {
+    const content = "長".repeat(300);
+    const embed = todoEmbed({ ...base, content }, 0x123456);
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBe(content);
+  });
+
+  test("重複和提前提醒各佔一欄", () => {
+    const embed = todoEmbed(
+      {
+        ...base,
+        cron: "0 20 * * 1",
+        timezone: "Asia/Taipei",
+        nextDueAt: "2026-09-14T12:00:00.000Z",
+        leadMinutes: 30,
+      },
+      0x123456,
+    );
+    expect(embed.fields?.map((field) => field.name)).toEqual([
+      "到期",
+      "重複",
+      "提前提醒",
+    ]);
+    expect(
+      embed.fields?.find((field) => field.name === "提前提醒")?.value,
+    ).toBe("30 分鐘");
+  });
+
+  test("沒有排程就沒有欄位", () => {
+    expect(todoEmbed(base, 0x123456).fields).toBeUndefined();
+  });
+});
+
+describe("absoluteTime", () => {
+  test("預設短格式 可以要完整格式", () => {
+    expect(absoluteTime("2026-09-10T10:00:00.000Z")).toBe("<t:1789034400:f>");
+    expect(absoluteTime("2026-09-10T10:00:00.000Z", "F")).toBe(
+      "<t:1789034400:F>",
     );
   });
 });

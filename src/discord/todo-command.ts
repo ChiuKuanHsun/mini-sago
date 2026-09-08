@@ -158,13 +158,60 @@ export function resolveTodo(todos: Todo[], query: string) {
   throw new Error("清單上沒有這一筆");
 }
 
+/** Discord 會用讀的人自己的時區顯示。刻意用絕對時間 相對時間看不出是哪一天。 */
+export function absoluteTime(instant: string, style: "f" | "F" = "f") {
+  return `<t:${Math.floor(Date.parse(instant) / 1000)}:${style}>`;
+}
+
 function describe(todo: Todo) {
   const parts = [`\`${shortId(todo)}\` ${todo.content}`];
-  if (todo.nextDueAt) {
-    parts.push(`<t:${Math.floor(Date.parse(todo.nextDueAt) / 1000)}:R>`);
-  }
+  if (todo.nextDueAt) parts.push(absoluteTime(todo.nextDueAt));
   if (todo.cron) parts.push(`🔁 \`${todo.cron}\``);
   return parts.join(" · ");
+}
+
+const EMBED_TITLE_MAX = 256;
+
+export type TodoEmbed = {
+  color: number;
+  title?: string;
+  description?: string;
+  fields?: Array<{ name: string; value: string; inline: boolean }>;
+  footer: { text: string };
+};
+
+/** 待辦在頻道裡的樣子。顏色跟她其他 embed 一致。 */
+export function todoEmbed(todo: Todo, color: number): TodoEmbed {
+  const fields: Array<{ name: string; value: string; inline: boolean }> = [];
+  if (todo.nextDueAt) {
+    fields.push({
+      name: "到期",
+      value: absoluteTime(todo.nextDueAt, "F"),
+      inline: false,
+    });
+  }
+  if (todo.cron) {
+    fields.push({
+      name: "重複",
+      value: `\`${todo.cron}\`${todo.timezone ? ` · ${todo.timezone}` : ""}`,
+      inline: true,
+    });
+  }
+  if (todo.leadMinutes !== undefined) {
+    fields.push({
+      name: "提前提醒",
+      value: `${todo.leadMinutes} 分鐘`,
+      inline: true,
+    });
+  }
+  // 超過標題上限就整段放進 description 不要截斷使用者寫的東西。
+  const long = todo.content.length > EMBED_TITLE_MAX;
+  return {
+    color,
+    ...(long ? { description: todo.content } : { title: todo.content }),
+    ...(fields.length ? { fields } : {}),
+    footer: { text: `編號 ${shortId(todo)}` },
+  };
 }
 
 export function renderTodoList(todos: Todo[]) {
@@ -201,9 +248,7 @@ export async function runTodoCommand(command: TodoCommand, todos: TodoList) {
   if (command.action === "done") {
     const result = await todos.complete(target.id);
     return result.recurring
-      ? `這輪算你完成 下次 <t:${Math.floor(
-          Date.parse(result.todo.nextDueAt!) / 1000,
-        )}:R> 再說`
+      ? `這輪算你完成 下次 ${absoluteTime(result.todo.nextDueAt!)} 再說`
       : `勾掉了 「${target.content}」`;
   }
 
