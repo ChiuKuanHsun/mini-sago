@@ -879,14 +879,13 @@ describe("Codex chatbot runner", () => {
     const prompt = buildCodexPrompt({ ...job, messages: [] }, [], []);
     const instructions = prompt.split("<current_request>")[0] ?? "";
 
-    // 上游的 8000 是為上游的功能集訂的。這個部署另外加了表格渲染
-    // embed 篇幅規則 冷處理與玩笑校準四塊指示 所以先放寬到 8400
-    // 8700 是為了指涉歸屬那段 它是「誤答成別人的事」這個 bug 的正解
-    // 壓到塞得進 8400 就得砍掉例子和「兩個都符合就問一句」的收尾 那段就不會發動
-    // 另一條路是改寫上游 1500 字元的 reference resolution 但那段跟身分守衛
-    // 和人設糾纏最深 為了 300 字元去動它不划算
-    // 下次再要加就真的該壓縮了 每 1000 字元約 300 token 而且每次請求都要付
-    expect(instructions.length).toBeLessThan(8_700);
+    // 上游的 8000 是為上游的功能集訂的。這個部署一路加了表格渲染 embed
+    // 篇幅規則 冷處理 玩笑校準 指涉歸屬 最後是情境範例 所以放寬到 10000。
+    // 情境範例是刻意的投資：研究顯示「情境→預期回應」比抽象規則更能擋住
+    // 模型滑回預設 assistant 人格 而這個 prompt 以前一個範例都沒有。
+    // 擁有者已明確表示長度可以放寬 但每 1000 字元約 300 token 且每次請求
+    // 都要付 加東西前先確認它真的對應到一個實際發生過的失敗案例。
+    expect(instructions.length).toBeLessThan(11_000);
     expect(prompt).not.toContain("<available_reactions_json>");
     expect(prompt).not.toContain("<extracted_attachments>");
     expect(prompt).not.toContain("<ignored_attachments>");

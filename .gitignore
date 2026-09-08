@@ -5,6 +5,9 @@ workspace/
 .env.production
 .env.production.local
 .env.worker
+# 上面都是確切檔名 手動備份會整個漏掉 例如 .env.production.bak
+.env*.bak
+.env.*.local
 .data
 npm-debug.log*
 *.tsbuildinfo

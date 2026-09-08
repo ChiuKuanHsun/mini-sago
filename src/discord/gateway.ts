@@ -24,6 +24,12 @@ import {
   type DiscordApplicationCommandInteraction,
 } from "./interactions";
 import { ChannelQuietTracker } from "./channel-quiet";
+import { getTodoList } from "./todo-list";
+import {
+  parseTodoCommand,
+  runTodoCommand,
+  type TodoCommand,
+} from "./todo-command";
 import { MemberMuteTracker } from "./member-mute";
 import { transcribeSpeech } from "./local-speech";
 import {
@@ -60,6 +66,8 @@ const MAX_RECONNECT_DELAY_MS = 60_000;
 const GUILDS_INTENT = 1 << 0;
 const GUILD_VOICE_STATES_INTENT = 1 << 7;
 const GUILD_MESSAGES_INTENT = 1 << 9;
+// 待辦清單靠 ✅ 收勾。這不是特權 intent 不用去 Developer Portal 開。
+const GUILD_MESSAGE_REACTIONS_INTENT = 1 << 10;
 const DIRECT_MESSAGES_INTENT = 1 << 12;
 const MESSAGE_CONTENT_INTENT = 1 << 15;
 
@@ -149,6 +157,16 @@ type DiscordWebhook = {
 type DiscordCreatedMessage = {
   id: string;
 };
+
+type DiscordMessageReactionAdd = {
+  user_id: string;
+  channel_id: string;
+  message_id: string;
+  guild_id?: string;
+  emoji?: { id?: string | null; name?: string | null };
+};
+
+const TODO_DONE_EMOJI = new Set(["✅", "☑️", "✔️"]);
 
 type InstagramGatewayConfig = {
   botToken: string;
@@ -434,6 +452,11 @@ class InstagramGatewayClient implements VoiceGateway {
       return;
     }
 
+    if (payload.t === "MESSAGE_REACTION_ADD") {
+      await this.handleReactionAdd(payload.d as DiscordMessageReactionAdd);
+      return;
+    }
+
     if (payload.t === "INTERACTION_CREATE") {
       await this.handleInteractionCreate(
         payload.d as DiscordApplicationCommandInteraction,
@@ -441,9 +464,83 @@ class InstagramGatewayClient implements VoiceGateway {
     }
   }
 
+  /** 待辦訊息上的勾。只認 owner 其他人的 reaction 一律忽略。 */
+  private async handleReactionAdd(reaction: DiscordMessageReactionAdd) {
+    if (!TODO_DONE_EMOJI.has(reaction.emoji?.name ?? "")) return;
+    if (reaction.user_id !== this.config.chatbotAccess.ownerUserId) return;
+    const todos = getTodoList();
+    if (!todos) return;
+
+    try {
+      const todo = await todos.findByMessageId(reaction.message_id);
+      if (!todo) return;
+      const result = await todos.complete(todo.id);
+      console.log(
+        result.recurring
+          ? `Todo ${todo.id} finished this round; next at ${result.todo.nextDueAt}.`
+          : `Todo ${todo.id} completed.`,
+      );
+    } catch (error) {
+      console.error(
+        `Failed to complete the todo behind message ${reaction.message_id}:`,
+        error,
+      );
+    }
+  }
+
+  /** /todo 直接動 store 不繞經 worker 才回得完三秒的 interaction。 */
+  private async handleTodoCommand(
+    interaction: DiscordApplicationCommandInteraction,
+    command: TodoCommand,
+  ) {
+    const discordRequest = createDiscordRequest(this.config.botToken);
+    try {
+      await deferEphemeralInteraction(interaction, discordRequest);
+    } catch (error) {
+      console.error(
+        `Failed to defer /todo interaction ${interaction.id}:`,
+        error,
+      );
+      return;
+    }
+    const respond = createEphemeralInteractionResponder(
+      interaction,
+      discordRequest,
+    );
+    const requesterId = interaction.member?.user?.id ?? interaction.user?.id;
+
+    try {
+      if (requesterId !== this.config.chatbotAccess.ownerUserId) {
+        await respond("這份清單只有他能動 你別碰");
+        return;
+      }
+      const todos = getTodoList();
+      if (!todos) {
+        await respond("待辦清單沒開 MINISAGO_TODO_CHANNEL_ID 還沒設");
+        return;
+      }
+      await respond(await runTodoCommand(command, todos));
+    } catch (error) {
+      await respond(
+        error instanceof Error ? error.message : "弄不好 等一下再試",
+      ).catch((responseError) => {
+        console.error(
+          `Failed to answer /todo interaction ${interaction.id}:`,
+          responseError,
+        );
+      });
+    }
+  }
+
   private async handleInteractionCreate(
     interaction: DiscordApplicationCommandInteraction,
   ) {
+    const todoCommand = parseTodoCommand(interaction);
+    if (todoCommand) {
+      await this.handleTodoCommand(interaction, todoCommand);
+      return;
+    }
+
     const prompt = getAskPrompt(interaction);
     if (!prompt || !interaction.channel_id) return;
 
@@ -549,6 +646,7 @@ class InstagramGatewayClient implements VoiceGateway {
           GUILDS_INTENT |
           GUILD_VOICE_STATES_INTENT |
           GUILD_MESSAGES_INTENT |
+          GUILD_MESSAGE_REACTIONS_INTENT |
           DIRECT_MESSAGES_INTENT |
           MESSAGE_CONTENT_INTENT,
         properties: {

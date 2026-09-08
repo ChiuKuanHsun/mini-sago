@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 
-import { MacAgentBridge, type MacAgentSocketData } from "./bridge";
 import {
+  MacAgentBridge,
+  jobTimeoutMs,
+  type MacAgentSocketData,
+} from "./bridge";
+import {
+  CHATBOT_ANSWER_JOB_TIMEOUT_MS,
+  CHATBOT_DEV_JOB_TIMEOUT_MS,
+  CHATBOT_JOB_TIMEOUT_MS,
   CHATBOT_PROTOCOL_VERSION,
   type ChatbotJob,
 } from "../../contracts/worker-contract";
@@ -82,6 +89,55 @@ function connectWorker(
   }
   return worker;
 }
+
+describe("job timeouts", () => {
+  const base = {
+    id: "job-1",
+    requesterUserId: "owner",
+    channelId: "channel-1",
+    requestMessageId: "message-1",
+    request: "look this up for me",
+    messages: [],
+    mcpAccessToken: "test-token",
+  };
+
+  test("gives chat answers room to finish a web search", () => {
+    expect(CHATBOT_ANSWER_JOB_TIMEOUT_MS).toBeGreaterThan(
+      CHATBOT_JOB_TIMEOUT_MS,
+    );
+    expect(
+      jobTimeoutMs({ ...base, purpose: "answer", executionRoute: "chat" }),
+    ).toBe(CHATBOT_ANSWER_JOB_TIMEOUT_MS);
+    expect(
+      jobTimeoutMs({ ...base, purpose: "answer", executionRoute: "mac" }),
+    ).toBe(CHATBOT_ANSWER_JOB_TIMEOUT_MS);
+  });
+
+  test("keeps the long budget for Oracle developer tasks", () => {
+    expect(
+      jobTimeoutMs({
+        ...base,
+        purpose: "answer",
+        executionRoute: "oracle",
+        repository: "ChiuKuanHsun/mini-sago",
+      }),
+    ).toBe(CHATBOT_DEV_JOB_TIMEOUT_MS);
+  });
+
+  test("leaves routing and other jobs on the short budget", () => {
+    const { mcpAccessToken, ...rest } = base;
+    expect(
+      jobTimeoutMs({
+        ...rest,
+        purpose: "execution_route",
+        availableRepositories: [],
+      }),
+    ).toBe(CHATBOT_JOB_TIMEOUT_MS);
+    expect(jobTimeoutMs({ ...rest, purpose: "trace_lookup" })).toBe(
+      CHATBOT_JOB_TIMEOUT_MS,
+    );
+  });
+});
 
 describe("Mac agent bridge", () => {
   test("binds cloud worker identity to its profile secret", () => {

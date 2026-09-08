@@ -27,6 +27,9 @@ import {
   type Reminder,
 } from "./discord/jobs/reminders";
 import { createDiscordRequest } from "./discord/api/request";
+import { configureTodoList, type Todo } from "./discord/todo-list";
+import { todoEmbed } from "./discord/todo-command";
+import { EMBED_COLOR } from "./chatbot/chatbot";
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -92,6 +95,12 @@ function handleRequest(request: Request, server: Server<MacAgentSocketData>) {
   return new Response("找不到此頁面", { status: 404 });
 }
 
+function renderTodoNotice(todo: Todo, kind: "lead" | "due") {
+  return kind === "lead"
+    ? `⏰ 「${todo.content}」還有 ${todo.leadMinutes} 分鐘`
+    : `⏰ 「${todo.content}」到期了`;
+}
+
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 getChatbotAccessConfig();
@@ -119,6 +128,84 @@ if (reminderBotToken) {
   });
 } else {
   console.warn("Reminder scheduler disabled: DISCORD_BOT_TOKEN is missing.");
+}
+
+const todoChannelId = process.env.MINISAGO_TODO_CHANNEL_ID?.trim();
+const todoOwnerUserId = process.env.MINISAGO_CHATBOT_OWNER_USER_ID?.trim();
+if (reminderBotToken && todoChannelId && todoOwnerUserId) {
+  const discordRequest = createDiscordRequest(reminderBotToken);
+  const ownerMention = {
+    parse: [] as string[],
+    users: [todoOwnerUserId],
+  };
+  configureTodoList({
+    postTodoMessage: async (todo: Todo) => {
+      const message = await discordRequest<{ id: string }>(
+        `/channels/${todoChannelId}/messages`,
+        {
+          method: "POST",
+          body: {
+            embeds: [todoEmbed(todo, EMBED_COLOR)],
+            allowed_mentions: { parse: [] },
+          },
+        },
+      );
+      // 先把勾加上去 打勾就少一個步驟。失敗不影響待辦本身。
+      try {
+        await discordRequest(
+          `/channels/${todoChannelId}/messages/${message.id}/reactions/${encodeURIComponent(
+            "✅",
+          )}/@me`,
+          { method: "PUT" },
+        );
+      } catch (error) {
+        console.warn(`Failed to pre-add the todo check mark:`, error);
+      }
+      return message.id;
+    },
+    postNotice: async (todo: Todo, kind) => {
+      const notice = await discordRequest<{ id: string }>(
+        `/channels/${todoChannelId}/messages`,
+        {
+        method: "POST",
+          body: {
+            content: `<@${todoOwnerUserId}> ${renderTodoNotice(todo, kind)}`,
+            allowed_mentions: ownerMention,
+            ...(todo.messageId
+              ? {
+                  message_reference: {
+                    message_id: todo.messageId,
+                    fail_if_not_exists: false,
+                  },
+                }
+              : {}),
+          },
+        },
+      );
+      return notice.id;
+    },
+    deleteTodoMessages: async (todo: Todo) => {
+      // 提醒是回覆在待辦訊息底下的 待辦收掉時它們也要跟著走
+      // 不然頻道裡會留下指向已刪訊息的孤兒。
+      const messageIds = [
+        ...(todo.messageId ? [todo.messageId] : []),
+        ...(todo.noticeMessageIds ?? []),
+      ];
+      for (const messageId of messageIds) {
+        try {
+          await discordRequest(
+            `/channels/${todoChannelId}/messages/${messageId}`,
+            { method: "DELETE" },
+          );
+        } catch (error) {
+          // 有人手動刪過就會 404。少刪一則不該擋住整筆待辦收掉。
+          console.warn(`Failed to delete todo message ${messageId}:`, error);
+        }
+      }
+    },
+  });
+} else if (!todoChannelId) {
+  console.warn("Todo list disabled: MINISAGO_TODO_CHANNEL_ID is missing.");
 }
 
 if (process.env.DISCORD_GATEWAY_DISABLED !== "true") {

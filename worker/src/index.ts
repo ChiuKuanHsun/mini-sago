@@ -1,7 +1,13 @@
 import { MacAgentClient } from "./client";
 import { loadMacAgentConfig } from "./config";
+import {
+  loadPromptOverrides,
+  watchPromptOverrides,
+} from "./prompts/overrides";
 
 const config = await loadMacAgentConfig();
+loadPromptOverrides(config.promptOverridesDirectory);
+watchPromptOverrides(config.promptOverridesDirectory);
 const client = new MacAgentClient(config);
 const healthServer = Bun.serve({
   hostname: "0.0.0.0",
