@@ -260,9 +260,11 @@ describe("prompt plan", () => {
     expect(plan.context.trimEnd().endsWith("</voice_anchor>")).toBe(true);
     expect(plan.context).toContain("You are still 中野二乃");
 
-    // 語音有自己的一套規則 不加錨點。
+    // 語音一樣要錨點 但講的是日文 所以是另一段文字。
     const voice = buildPromptPlan({ ...baseJob, streamReply: true }, [], []);
-    expect(voice.context).not.toContain("voice_anchor");
+    expect(voice.context.trimEnd().endsWith("</voice_anchor>")).toBe(true);
+    expect(voice.context).toContain("this is being spoken aloud");
+    expect(voice.context).not.toContain("Her everyday Chinese");
 
     // developer task 要以 Codex 身分工作 不是二乃。
     const developer = buildPromptPlan(
