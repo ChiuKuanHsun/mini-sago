@@ -14,22 +14,48 @@ import type {
 import { macAgentBridge } from "./bridge";
 import { registerChatbotMcpSession } from "./mcp";
 
-export const THINKING_FEEDBACK = "うーん…。";
-export const THINKING_GAP_MS = 2_000;
+// 同一段音檔重複播是最像機器的一件事 所以輪替台詞 拉長間隔 並且只講兩次
+export const THINKING_FEEDBACK_LINES = [
+  "うーん…。",
+  "ちょっと待って。",
+  "んー、そうね…。",
+  "今考えてるんだけど。",
+  "ちょっと待ちなさいよ。",
+] as const;
+export const THINKING_GAP_MS = 3_500;
+export const THINKING_FEEDBACK_LIMIT = 2;
 const FAILURE_FEEDBACK = "ごめん、うまくいかなかった。もう一度お願い。";
+const THINKING_LINES: readonly string[] = THINKING_FEEDBACK_LINES;
 const feedbackSpeech = new SpeechCache((text) =>
-  synthesizeSpeech(text, text === THINKING_FEEDBACK ? { speedScale: 0.8 } : {}),
+  synthesizeSpeech(text, THINKING_LINES.includes(text) ? { speedScale: 0.8 } : {}),
 );
-const feedbackLines = [THINKING_FEEDBACK, FAILURE_FEEDBACK] as const;
+const feedbackLines = [...THINKING_FEEDBACK_LINES, FAILURE_FEEDBACK] as const;
+
+export function createThinkingLinePicker(
+  lines: readonly string[] = THINKING_FEEDBACK_LINES,
+  random: () => number = Math.random,
+) {
+  let last: string | undefined;
+  return () => {
+    const pool =
+      lines.length > 1 ? lines.filter((line) => line !== last) : lines;
+    const next = pool[Math.floor(random() * pool.length) % pool.length];
+    last = next ?? last;
+    return next ?? lines[0]!;
+  };
+}
 
 export function startThinkingFeedback(options: {
   getAudio: () => Promise<Buffer>;
   play: (audio: Buffer) => void | Promise<void>;
   isCurrent: () => boolean;
   gapMs?: number;
+  limit?: number;
 }) {
   let stopped = false;
+  let played = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = options.limit ?? THINKING_FEEDBACK_LIMIT;
   const active = () => !stopped && options.isCurrent();
   const play = async () => {
     if (!active()) return;
@@ -37,10 +63,11 @@ export function startThinkingFeedback(options: {
       const audio = await options.getAudio();
       if (!active()) return;
       await options.play(audio);
+      played += 1;
     } catch (error) {
       console.warn("Could not play thinking feedback:", error);
     }
-    if (active())
+    if (active() && played < limit)
       timer = setTimeout(() => {
         void play();
       }, options.gapMs ?? THINKING_GAP_MS);
@@ -128,8 +155,9 @@ export async function respondToVoiceChat(
 ): Promise<VoiceChatResponse | null> {
   if (!input.isCurrent()) return null;
   const { transcript } = input;
+  const nextThinkingLine = createThinkingLinePicker();
   const stopFeedback = startThinkingFeedback({
-    getAudio: () => feedbackSpeech.get(THINKING_FEEDBACK),
+    getAudio: () => feedbackSpeech.get(nextThinkingLine()),
     play: (audio) => input.onAudio(audio, "feedback"),
     isCurrent: input.isCurrent,
   });
