@@ -9,7 +9,20 @@ const VOICEVOX_URL =
 const SPEECH_COMMAND_TIMEOUT_MS = 30_000;
 const TRANSCRIPTION_TIMEOUT_MS = 120_000;
 const SYNTHESIS_TIMEOUT_MS = 120_000;
-export const VOICEVOX_SPEAKER_ID = 58;
+const DEFAULT_VOICEVOX_SPEAKER_ID = 58;
+
+export function resolveVoicevoxSpeakerId(
+  value = process.env.MINISAGO_VOICEVOX_SPEAKER_ID,
+) {
+  const trimmed = value?.trim();
+  if (!trimmed) return DEFAULT_VOICEVOX_SPEAKER_ID;
+  const configured = Number(trimmed);
+  return Number.isInteger(configured) && configured >= 0
+    ? configured
+    : DEFAULT_VOICEVOX_SPEAKER_ID;
+}
+
+export const VOICEVOX_SPEAKER_ID = resolveVoicevoxSpeakerId();
 
 export class SpeechCache {
   private readonly audio = new Map<string, Promise<Buffer>>();
