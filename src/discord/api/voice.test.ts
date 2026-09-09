@@ -66,8 +66,8 @@ describe("VoiceStateTracker", () => {
   });
 });
 
-test("voice actions fail closed until the Discord gateway is ready", () => {
-  expect(joinMemberVoiceChannel("guild-1", "user-1")).toEqual({
+test("voice actions fail closed until the Discord gateway is ready", async () => {
+  expect(await joinMemberVoiceChannel("guild-1", "user-1")).toEqual({
     status: "gateway_unavailable",
   });
   expect(leaveVoiceChannel("guild-1")).toEqual({

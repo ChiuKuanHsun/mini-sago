@@ -1,3 +1,5 @@
+import type { SpeechAvailability } from "../local-speech";
+
 export type DiscordVoiceState = {
   guild_id?: string;
   user_id: string;
@@ -60,7 +62,7 @@ export class VoiceStateTracker {
 }
 
 export type VoiceChannelActionResult =
-  | { status: "joined"; channelId: string }
+  | { status: "joined"; channelId: string; speech: SpeechAvailability }
   | { status: "left" }
   | { status: "member_not_in_voice" }
   | { status: "gateway_unavailable" };
@@ -78,7 +80,7 @@ export interface VoiceGateway {
   joinMemberVoiceChannel(
     guildId: string,
     userId: string,
-  ): JoinVoiceChannelResult;
+  ): Promise<JoinVoiceChannelResult>;
   leaveVoiceChannel(guildId: string): LeaveVoiceChannelResult;
 }
 
@@ -88,12 +90,12 @@ export function registerVoiceGateway(gateway: VoiceGateway | null) {
   activeVoiceGateway = gateway;
 }
 
-export function joinMemberVoiceChannel(
+export async function joinMemberVoiceChannel(
   guildId: string,
   userId: string,
-): JoinVoiceChannelResult {
+): Promise<JoinVoiceChannelResult> {
   return (
-    activeVoiceGateway?.joinMemberVoiceChannel(guildId, userId) ?? {
+    (await activeVoiceGateway?.joinMemberVoiceChannel(guildId, userId)) ?? {
       status: "gateway_unavailable" as const,
     }
   );

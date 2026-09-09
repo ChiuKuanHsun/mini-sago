@@ -5,6 +5,7 @@ import type {
   ChatbotMessage,
 } from "../../contracts/worker-contract";
 import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
+import { leaveVoiceChannel } from "../discord/api/voice";
 import { SpeechCache, synthesizeSpeech } from "../discord/local-speech";
 import type {
   VoiceChatResponse,
@@ -89,13 +90,24 @@ async function playFeedback(text: string, onAudio: (audio: Buffer) => void) {
   }
 }
 
+// 合成服務可能在另一台機器上 core 先起來是常態 所以重試而不是一次就放棄。
+const PREWARM_RETRY_DELAYS_MS = [10_000, 30_000, 60_000] as const;
+
 export async function prewarmVoiceChatSpeech() {
-  try {
-    await feedbackSpeech.prewarm(feedbackLines);
-  } catch (error) {
-    console.warn(
-      `Could not prewarm voice feedback: ${error instanceof Error ? error.message : "unknown error"}`,
-    );
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await feedbackSpeech.prewarm(feedbackLines);
+      return;
+    } catch (error) {
+      const delay = PREWARM_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        console.warn(
+          `Could not prewarm voice feedback: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+        return;
+      }
+      await Bun.sleep(delay);
+    }
   }
 }
 
@@ -175,6 +187,8 @@ export async function respondToVoiceChat(
   };
   const messages = contextMessages(input.history, input.channelId);
   const mcpSession = registerChatbotMcpSession({
+    // 語音裡唯一有意義的動作就是離開 join 沒有意義 她已經在頻道裡了。
+    leaveVoiceChannel: () => leaveVoiceChannel(input.guildId),
     resolveContext: async () => ({
       history: { status: "complete", messages },
       search: { status: "not_requested", results: [] },
@@ -199,6 +213,14 @@ export async function respondToVoiceChat(
         availability: "available",
         description:
           "Reply naturally in Japanese using at most two short sentences for a live Discord group voice chat. The local voice is Japanese-only, so do not include English words, emoji, Markdown, URLs, or other text that would sound unclear when spoken.",
+      },
+      {
+        id: "voice_presence",
+        category: "discord",
+        availability: "available",
+        description:
+          "Leave this voice channel when the requester asks you to. You are already in it, so there is nothing to join.",
+        tools: ["leave_voice_channel"],
       },
     ],
     executionRoute: "chat",
