@@ -480,9 +480,13 @@ describe("Codex chatbot runner", () => {
 
     const voiceJob = { ...answerJob, streamReply: true };
     expect(outputSchemaForJob(voiceJob)).toBe(VOICE_ANSWER_OUTPUT_SCHEMA);
-    expect(buildCodexPrompt(voiceJob, [], [])).toContain(
-      "brief, natural Japanese reply",
-    );
+    const voicePrompt = buildCodexPrompt(voiceJob, [], []);
+    expect(voicePrompt).toContain("brief, natural Japanese reply");
+    // 日文的傲嬌是靠語尾承載的 這句是語音人設的核心 不要弱化成抽象規則。
+    expect(voicePrompt).toContain("sentence-final particles");
+    // 這兩個工具在語音裡沒註冊 指令留著只會叫她用不存在的東西。
+    expect(voicePrompt).not.toContain("manage_server_memory");
+    expect(voicePrompt).not.toContain("nthusa tools");
   });
 
   test("uses native Codex output in the requester's language for Discord coding threads", () => {

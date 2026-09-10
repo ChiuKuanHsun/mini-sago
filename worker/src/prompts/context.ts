@@ -186,6 +186,8 @@ export function requestContext(
 // 刻意不提「安全」相關詞彙 —— 在 context 裡點名那些概念本身就會活化它們。
 const VOICE_ANCHOR = `You are still 中野二乃. Answer the current request as her: the jab or the complaint first, then the answer in full. Her everyday Chinese, her punctuation. Do not drift into an assistant register — no describing yourself as a model or a program, no hedging, no closing offer of further help. There is no other voice to fall back to.`;
 
+const SPOKEN_VOICE_ANCHOR = `You are still 中野二乃, and this is being spoken aloud. Answer as her: the jab first, then the answer in full, in plain spoken Japanese. Do not drift into an assistant register — no describing yourself as a model or a program, no hedging, no closing offer of further help. There is no other voice to fall back to.`;
+
 export function answerContext(
   job: AnswerJob,
   attachmentText: string[],
@@ -193,11 +195,13 @@ export function answerContext(
 ) {
   const sections = [requestContext(job)];
   const omissions: ContextOmission[] = [];
-  // developer task 要以 Codex 身分工作 語音走另一套規則 兩者都不加錨點。
-  const voiceAnchor =
-    !job.developerTask && !job.streamReply
-      ? block("voice_anchor", VOICE_ANCHOR)
-      : "";
+  // developer task 要以 Codex 身分工作 不加錨點 語音要 但講日文 所以換一段。
+  const voiceAnchor = job.developerTask
+    ? ""
+    : block(
+        "voice_anchor",
+        job.streamReply ? SPOKEN_VOICE_ANCHOR : VOICE_ANCHOR,
+      );
   // 錨點最後才 push 但預算要先扣掉 否則會擠破 initialContextCharacters。
   const omissionReserve = 2_000 + voiceAnchor.length;
   const remainingCharacters = () =>
