@@ -422,10 +422,11 @@ export type ChatbotMcpSessionHandlers = {
     guildName?: string;
     jumpUrl: string;
   }>;
-  joinVoiceChannel?: () =>
-    | { status: "joined"; channelId: string }
+  joinVoiceChannel?: () => Promise<
+    | { status: "joined"; channelId: string; speech: "ready" | "unavailable" }
     | { status: "member_not_in_voice" }
-    | { status: "gateway_unavailable" };
+    | { status: "gateway_unavailable" }
+  >;
   leaveVoiceChannel?: () =>
     | { status: "left" }
     | { status: "gateway_unavailable" };
@@ -607,14 +608,19 @@ function availableCapabilities(
       tools: ["mute_member", "release_member", "list_muted_members"],
     });
   }
-  if (handlers.joinVoiceChannel && handlers.leaveVoiceChannel) {
+  // 語音路徑只拿得到 leave 所以兩把工具各自獨立掛載。
+  if (handlers.joinVoiceChannel || handlers.leaveVoiceChannel) {
     capabilities.push({
       id: "voice_presence",
       category: "discord",
       availability: "available",
-      description:
-        "Join the requester's current voice channel for a live spoken conversation, or leave the current server's voice channel.",
-      tools: ["join_voice_channel", "leave_voice_channel"],
+      description: handlers.joinVoiceChannel
+        ? "Join the requester's current voice channel for a live spoken conversation, or leave the current server's voice channel."
+        : "Leave the voice channel you are currently speaking in.",
+      tools: [
+        ...(handlers.joinVoiceChannel ? ["join_voice_channel"] : []),
+        ...(handlers.leaveVoiceChannel ? ["leave_voice_channel"] : []),
+      ],
     });
   }
   if (
@@ -1321,31 +1327,32 @@ function createServer(session: ChatbotMcpSession) {
     );
   }
 
-  if (session.handlers.joinVoiceChannel && session.handlers.leaveVoiceChannel) {
-    const voiceAnnotations = {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    } as const;
+  const voiceAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  } as const;
 
+  if (session.handlers.joinVoiceChannel) {
     server.registerTool(
       "join_voice_channel",
       {
         description:
-          "Join the current requester's current Discord voice channel for a live spoken conversation. The requester and guild are host-bound; there are no member, channel, or guild arguments. Call only when the requester asks you to join voice chat.",
+          "Join the current requester's current Discord voice channel for a live spoken conversation. The requester and guild are host-bound; there are no member, channel, or guild arguments. Call only when the requester asks you to join voice chat. A successful result carries speech: when it is 'unavailable' you are in the channel but cannot hear or speak there, so say that yourself in this text channel, in your own voice, and never leave it unsaid.",
         inputSchema: {},
         annotations: voiceAnnotations,
       },
       async () => {
         try {
-          const result = session.handlers.joinVoiceChannel!();
+          const result = await session.handlers.joinVoiceChannel!();
           return toolResult(
             result.status === "joined"
               ? {
                   status: "complete",
                   action: "joined",
                   channelId: result.channelId,
+                  speech: result.speech,
                 }
               : result,
           );
@@ -1354,7 +1361,9 @@ function createServer(session: ChatbotMcpSession) {
         }
       },
     );
+  }
 
+  if (session.handlers.leaveVoiceChannel) {
     server.registerTool(
       "leave_voice_channel",
       {
