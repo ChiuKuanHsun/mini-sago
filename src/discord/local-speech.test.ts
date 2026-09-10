@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import {
+  resolveVoicevoxSpeakerId,
   SpeechCache,
   VOICEVOX_SPEAKER_ID,
   voicevoxAudioQueryUrl,
@@ -34,7 +35,17 @@ test("prewarms voice feedback in order", async () => {
   expect(calls).toEqual(["聞いてるよ", "待ってね"]);
 });
 
-test("requests Nekotsuka Bi's normal VOICEVOX style", () => {
+test("resolves the configured VOICEVOX style", () => {
+  expect(resolveVoicevoxSpeakerId(undefined)).toBe(58);
+  expect(resolveVoicevoxSpeakerId("")).toBe(58);
+  expect(resolveVoicevoxSpeakerId("   ")).toBe(58);
+  expect(resolveVoicevoxSpeakerId("tsuntsun")).toBe(58);
+  expect(resolveVoicevoxSpeakerId("-1")).toBe(58);
+  expect(resolveVoicevoxSpeakerId("2.5")).toBe(58);
+  expect(resolveVoicevoxSpeakerId(" 6 ")).toBe(6);
+});
+
+test("defaults to Nekotsuka Bi's normal VOICEVOX style", () => {
   expect(VOICEVOX_SPEAKER_ID).toBe(58);
   expect(
     voicevoxAudioQueryUrl("一緒に話そう", "http://voicevox:50021").href,

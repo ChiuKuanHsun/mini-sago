@@ -35,6 +35,47 @@ services:
     depends_on:
       - core
 
+  whisper:
+    image: minisago-core:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minisago-whisper
+    restart: unless-stopped
+    init: true
+    entrypoint:
+      - whisper-server
+    # 兩顆核，執行緒開到 2 就滿了 再多只是互搶
+    command:
+      - --model
+      - /opt/minisago-models/ggml-base.bin
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --threads
+      - "2"
+    # 實測峰值 237MiB base 模型常駐 轉寫時不再成長
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - minisago-edge
+
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-arm64-ubuntu24.04-latest
+    container_name: minisago-voicevox
+    restart: unless-stopped
+    init: true
+    # 實測峰值 368MiB 合成一句 3 秒語音時不再成長
+    mem_limit: 1g
+    networks:
+      - minisago-edge
+
 volumes:
   minisago-core-state:
   caddy-data:

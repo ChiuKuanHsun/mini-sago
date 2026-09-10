@@ -38,7 +38,10 @@ Start with [Discord setup](docs/discord-setup.md) and
 
 ## Voice credits
 
-MiniSago's voice chat uses **VOICEVOX:猫使ビィ**.
+MiniSago's voice chat uses VOICEVOX. The speaking style is chosen with
+`MINISAGO_VOICEVOX_SPEAKER_ID` and defaults to **VOICEVOX:猫使ビィ** (style 58).
+Credit the character actually configured, and check that character's own terms;
+they differ per voice library.
 See the [VOICEVOX terms](https://voicevox.hiroshiba.jp/term/) and
 [猫使 voice library terms](https://nekotukarb.wixsite.com/nekonohako/利用規約).
 
