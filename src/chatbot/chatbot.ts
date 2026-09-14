@@ -19,11 +19,7 @@ import {
   tripPlannerAvailableForGuild,
 } from "./trip-planner";
 import { getGuildMemoryStore } from "./guild-memory";
-import {
-  attachLatexFormulas,
-  LATEX_MAX_ATTACHMENTS,
-  placeFormulaFiles,
-} from "./latex";
+import { attachLatexFormulas, placeFormulaFiles } from "./latex";
 import type {
   ChatbotCapability,
   ChatbotFailureKind,
@@ -2071,12 +2067,12 @@ export async function handleChatbotMention({
   }
   if (reply || files.length > 0 || embed) {
     // Discord 不渲染 LaTeX：獨立公式轉成 PNG 附件，行內公式改寫成 Unicode。
-    const formulas = reply
-      ? await attachLatexFormulas(reply, LATEX_MAX_ATTACHMENTS - files.length)
-      : undefined;
+    const formulas = reply ? await attachLatexFormulas(reply) : undefined;
     const content = formulas ? formatDiscordAnswers(formulas.content) : null;
     const filesByPart =
-      content && formulas ? placeFormulaFiles(content, formulas.formulas) : [];
+      content && formulas
+        ? placeFormulaFiles(content, formulas.formulas, files.length)
+        : [];
     await respond(content, files, embed, filesByPart);
     if (!invocation) {
       conversationTracker?.activate(message.channel_id, requesterUserId);
