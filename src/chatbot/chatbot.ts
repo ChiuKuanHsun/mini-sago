@@ -19,6 +19,11 @@ import {
   tripPlannerAvailableForGuild,
 } from "./trip-planner";
 import { getGuildMemoryStore } from "./guild-memory";
+import {
+  attachLatexFormulas,
+  LATEX_MAX_ATTACHMENTS,
+  placeFormulaFiles,
+} from "./latex";
 import type {
   ChatbotCapability,
   ChatbotFailureKind,
@@ -513,7 +518,9 @@ function renderTableRows(rows: string[][]) {
   if (total <= TABLE_CODE_BLOCK_MAX_WIDTH) {
     const lines = rows.map((row) =>
       row
-        .map((cell, column) => padCell(plainCell(cell ?? ""), widths[column] ?? 0))
+        .map((cell, column) =>
+          padCell(plainCell(cell ?? ""), widths[column] ?? 0),
+        )
         .join("  ")
         .trimEnd(),
     );
@@ -552,7 +559,11 @@ export function renderDiscordTables(content: string) {
       continue;
     }
 
-    if (!fence && isTableRow(line) && isTableDelimiter(lines[index + 1] ?? "")) {
+    if (
+      !fence &&
+      isTableRow(line) &&
+      isTableDelimiter(lines[index + 1] ?? "")
+    ) {
       const header = tableCells(line);
       const rows: string[][] = [header];
       let cursor = index + 2;
@@ -720,6 +731,8 @@ export async function postChatbotResponse(
   discordRequest: DiscordRequest,
   files: ChatbotOutgoingFile[] = [],
   embed?: ChatbotEmbed,
+  // `files` 掛在第一則；`filesByPart[i]` 掛在第 i 則（公式圖跟著自己的佔位符）。
+  filesByPart: ChatbotOutgoingFile[][] = [],
 ) {
   const contents = Array.isArray(content) ? content : [content];
   let canPostDirectly = false;
@@ -739,7 +752,10 @@ export async function postChatbotResponse(
       canPostDirectly || index > 0
         ? channelMessageBody(content, messageEmbed)
         : replyBody(message, content, messageEmbed);
-    const uploadFiles = index === 0 ? files : [];
+    const uploadFiles = [
+      ...(index === 0 ? files : []),
+      ...(filesByPart[index] ?? []),
+    ];
     const formData =
       uploadFiles.length > 0
         ? (() => {
@@ -1268,10 +1284,19 @@ export async function handleChatbotMention({
     content: string | string[] | null,
     files: ChatbotOutgoingFile[] = [],
     embed?: ChatbotEmbed,
+    filesByPart: ChatbotOutgoingFile[][] = [],
   ) =>
     invocation?.respond
-      ? invocation.respond(content, files, embed)
-      : postChatbotResponse(message, content, discordRequest, files, embed);
+      ? // 斜線指令的回覆只有第一則能帶附件，公式圖全部併進去。
+        invocation.respond(content, [...files, ...filesByPart.flat()], embed)
+      : postChatbotResponse(
+          message,
+          content,
+          discordRequest,
+          files,
+          embed,
+          filesByPart,
+        );
 
   if (!requesterUserId || requesterUserId === botUserId || message.webhook_id) {
     return false;
@@ -1646,8 +1671,7 @@ export async function handleChatbotMention({
                   input.userId,
                 ),
               }),
-              listMutedMembers: () =>
-                memberMuteTracker.list(message.guild_id!),
+              listMutedMembers: () => memberMuteTracker.list(message.guild_id!),
             }
           : {}),
         ...(requesterUserId === accessConfig.ownerUserId && featureAvailability
@@ -2046,8 +2070,14 @@ export async function handleChatbotMention({
     reply = "剛剛卡住了 晚點再叫我 不要連按";
   }
   if (reply || files.length > 0 || embed) {
-    const content = reply ? formatDiscordAnswers(reply) : null;
-    await respond(content, files, embed);
+    // Discord 不渲染 LaTeX：獨立公式轉成 PNG 附件，行內公式改寫成 Unicode。
+    const formulas = reply
+      ? await attachLatexFormulas(reply, LATEX_MAX_ATTACHMENTS - files.length)
+      : undefined;
+    const content = formulas ? formatDiscordAnswers(formulas.content) : null;
+    const filesByPart =
+      content && formulas ? placeFormulaFiles(content, formulas.formulas) : [];
+    await respond(content, files, embed, filesByPart);
     if (!invocation) {
       conversationTracker?.activate(message.channel_id, requesterUserId);
     }
