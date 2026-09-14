@@ -694,6 +694,32 @@ function rendererInstance() {
   return rendererPromise;
 }
 
+// MathJax 的數學字形是路徑，但 \text{中文} 這種它字型裡沒有的字會輸出成 <text>，
+// wasm 版 resvg 沒有系統字型可查，所以要自己餵一個 CJK 字型進去。
+// 預設是 Dockerfile 裝的 Noto Sans CJK；本機開發可用 MINISAGO_FORMULA_FONT 指到別的檔。
+// 找不到就照舊渲染（中文缺字），只 warn 一次。
+export const FORMULA_FONT_ENV = "MINISAGO_FORMULA_FONT";
+const FORMULA_FONT_DEFAULT = "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc";
+let fontPromise: Promise<Uint8Array | undefined> | undefined;
+
+export function formulaFontPath() {
+  return process.env[FORMULA_FONT_ENV]?.trim() || FORMULA_FONT_DEFAULT;
+}
+
+function formulaFont() {
+  fontPromise ??= readFile(formulaFontPath()).then(
+    (buffer) => new Uint8Array(buffer),
+    (error: unknown) => {
+      console.warn(
+        `[latex] formula font unavailable at ${formulaFontPath()}; CJK text in formulas will be blank:`,
+        error instanceof Error ? error.message : error,
+      );
+      return undefined;
+    },
+  );
+  return fontPromise;
+}
+
 // 頂層的 \\ 換行 MathJax 不會理（x=1\\y=2 會黏成一行），包進 gathered 才會分行。
 // 環境（cases、pmatrix）自己開頭的就不用包。
 function withLineBreaks(tex: string) {
@@ -705,6 +731,7 @@ function withLineBreaks(tex: string) {
 // 轉不出來（TeX 有錯、MathJax 內部例外、SVG 尺寸讀不到）就回 undefined，讓呼叫端保留原文。
 export async function renderLatexPng(
   tex: string,
+  { withFont = true }: { withFont?: boolean } = {},
 ): Promise<Uint8Array | undefined> {
   if (!tex.trim() || tex.length > LATEX_MAX_SOURCE_LENGTH) return undefined;
   let renderer: Renderer;
@@ -736,7 +763,13 @@ export async function renderLatexPng(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width + IMAGE_PADDING * 2}" height="${height + IMAGE_PADDING * 2}">` +
       `<rect width="100%" height="100%" fill="${IMAGE_BACKGROUND}"/>` +
       `<g transform="translate(${IMAGE_PADDING},${IMAGE_PADDING})">${inner}</g></svg>`;
-    return new renderer.Resvg(wrapped, { fitTo: { mode: "original" } })
+    // 只有真的有 <text>（非數學字形）時才載字型，19 MB 的 TTC 不必每張都解析。
+    const font =
+      withFont && inner.includes("<text") ? await formulaFont() : undefined;
+    return new renderer.Resvg(wrapped, {
+      fitTo: { mode: "original" },
+      font: font ? { fontBuffers: [font] } : { loadSystemFonts: false },
+    })
       .render()
       .asPng();
   } catch (error) {

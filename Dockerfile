@@ -38,6 +38,9 @@ ENV PORT=3000
 COPY package.json bun.lock ./
 RUN apk add --no-cache git
 RUN apk add --no-cache ffmpeg libstdc++
+# 公式圖裡的中文字（\text{…}）要靠這個字型；套件裝四個 TTC 共 88 MiB，只留用到的那個。
+RUN apk add --no-cache font-noto-cjk \
+  && find /usr/share/fonts/noto -type f ! -name NotoSansCJK-Regular.ttc -delete
 RUN bun install --frozen-lockfile --production
 
 COPY --from=builder --chown=bun:bun /app/src ./src
