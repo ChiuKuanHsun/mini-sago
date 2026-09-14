@@ -9,6 +9,9 @@ const VOICEVOX_URL =
 const SPEECH_COMMAND_TIMEOUT_MS = 30_000;
 const TRANSCRIPTION_TIMEOUT_MS = 120_000;
 const SYNTHESIS_TIMEOUT_MS = 120_000;
+const SPEECH_PROBE_TIMEOUT_MS = 2_000;
+
+export type SpeechAvailability = "ready" | "unavailable";
 const DEFAULT_VOICEVOX_SPEAKER_ID = 58;
 
 export function resolveVoicevoxSpeakerId(
@@ -96,6 +99,28 @@ export function voicevoxAudioQueryUrl(text: string, baseUrl = VOICEVOX_URL) {
 
 export function whisperInferenceUrl(baseUrl = WHISPER_URL) {
   return new URL("inference", `${baseUrl.replace(/\/$/u, "")}/`);
+}
+
+export function whisperRootUrl(baseUrl = WHISPER_URL) {
+  return new URL(`${baseUrl.replace(/\/$/u, "")}/`);
+}
+
+export function voicevoxVersionUrl(baseUrl = VOICEVOX_URL) {
+  return new URL("version", `${baseUrl.replace(/\/$/u, "")}/`);
+}
+
+// 語音服務可能在另一台機器上 沒開機時進頻道本身仍然成立 她只是得說得出原因。
+export async function probeSpeechServices(): Promise<SpeechAvailability> {
+  try {
+    const responses = await Promise.all(
+      [whisperRootUrl(), voicevoxVersionUrl()].map((url) =>
+        fetch(url, { signal: AbortSignal.timeout(SPEECH_PROBE_TIMEOUT_MS) }),
+      ),
+    );
+    return responses.every((response) => response.ok) ? "ready" : "unavailable";
+  } catch {
+    return "unavailable";
+  }
 }
 
 function voicevoxSynthesisUrl() {

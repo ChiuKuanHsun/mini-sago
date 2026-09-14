@@ -895,8 +895,9 @@ export async function runCodexJob(job: CodexJob, options: CodexRunOptions) {
     const macFilesMcp = hasMacFileAccess
       ? macFilesMcpConfig(options.macFileRoots)
       : undefined;
+    // 語音只留必要的工具 校園 MCP 在語音裡沒人用得到。
     const nthuCampusMcp =
-      job.purpose === "answer" && !job.developerTask
+      job.purpose === "answer" && !job.developerTask && !job.streamReply
         ? nthuCampusMcpConfig()
         : undefined;
     const codexArguments = [

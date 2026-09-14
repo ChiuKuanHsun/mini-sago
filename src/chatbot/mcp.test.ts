@@ -795,14 +795,31 @@ describe("MiniSago MCP server", () => {
     session.revoke();
   });
 
+  // 語音路徑只傳得到 leave 兩把工具必須能各自獨立掛載。
+  test("registers leaving without joining for a voice session", async () => {
+    const session = registerChatbotMcpSession({
+      ...handlers(),
+      leaveVoiceChannel: () => ({ status: "left" as const }),
+    });
+    const client = await connect(session.token);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+
+    expect(names).toContain("leave_voice_channel");
+    expect(names).not.toContain("join_voice_channel");
+  });
+
   test("exposes host-bound voice channel actions", async () => {
     let joined = 0;
     let left = 0;
     const session = registerChatbotMcpSession({
       ...handlers(),
-      joinVoiceChannel: () => {
+      joinVoiceChannel: async () => {
         joined += 1;
-        return { status: "joined" as const, channelId: "voice-1" };
+        return {
+          status: "joined" as const,
+          channelId: "voice-1",
+          speech: "ready" as const,
+        };
       },
       leaveVoiceChannel: () => {
         left += 1;
@@ -827,6 +844,8 @@ describe("MiniSago MCP server", () => {
       status: "complete",
       action: "joined",
       channelId: "voice-1",
+      // 語音服務可能在別台機器上 進場結果要把狀態帶回去讓她說得出口。
+      speech: "ready",
     });
 
     const leaveResult = await client.callTool({

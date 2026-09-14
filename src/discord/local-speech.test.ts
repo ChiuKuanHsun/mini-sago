@@ -5,7 +5,9 @@ import {
   SpeechCache,
   VOICEVOX_SPEAKER_ID,
   voicevoxAudioQueryUrl,
+  voicevoxVersionUrl,
   whisperInferenceUrl,
+  whisperRootUrl,
 } from "./local-speech";
 
 test("caches reusable voice feedback", async () => {
@@ -51,6 +53,16 @@ test("defaults to Nekotsuka Bi's normal VOICEVOX style", () => {
     voicevoxAudioQueryUrl("一緒に話そう", "http://voicevox:50021").href,
   ).toBe(
     "http://voicevox:50021/audio_query?text=%E4%B8%80%E7%B7%92%E3%81%AB%E8%A9%B1%E3%81%9D%E3%81%86&speaker=58",
+  );
+});
+
+test("probes both speech services under any base path", () => {
+  expect(voicevoxVersionUrl("http://laptop:50021").href).toBe(
+    "http://laptop:50021/version",
+  );
+  // base URL 可以帶路徑前綴 探測不能把它吃掉。
+  expect(whisperRootUrl("http://laptop:8080/prefix").href).toBe(
+    "http://laptop:8080/prefix/",
   );
 });
 

@@ -5,6 +5,7 @@ import type {
   ChatbotMessage,
 } from "../../contracts/worker-contract";
 import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
+import { leaveVoiceChannel } from "../discord/api/voice";
 import { SpeechCache, synthesizeSpeech } from "../discord/local-speech";
 import type {
   VoiceChatResponse,
@@ -14,22 +15,48 @@ import type {
 import { macAgentBridge } from "./bridge";
 import { registerChatbotMcpSession } from "./mcp";
 
-export const THINKING_FEEDBACK = "うーん…。";
-export const THINKING_GAP_MS = 2_000;
+// 同一段音檔重複播是最像機器的一件事 所以輪替台詞 拉長間隔 並且只講兩次
+export const THINKING_FEEDBACK_LINES = [
+  "うーん…。",
+  "ちょっと待って。",
+  "んー、そうね…。",
+  "今考えてるんだけど。",
+  "ちょっと待ちなさいよ。",
+] as const;
+export const THINKING_GAP_MS = 3_500;
+export const THINKING_FEEDBACK_LIMIT = 2;
 const FAILURE_FEEDBACK = "ごめん、うまくいかなかった。もう一度お願い。";
+const THINKING_LINES: readonly string[] = THINKING_FEEDBACK_LINES;
 const feedbackSpeech = new SpeechCache((text) =>
-  synthesizeSpeech(text, text === THINKING_FEEDBACK ? { speedScale: 0.8 } : {}),
+  synthesizeSpeech(text, THINKING_LINES.includes(text) ? { speedScale: 0.8 } : {}),
 );
-const feedbackLines = [THINKING_FEEDBACK, FAILURE_FEEDBACK] as const;
+const feedbackLines = [...THINKING_FEEDBACK_LINES, FAILURE_FEEDBACK] as const;
+
+export function createThinkingLinePicker(
+  lines: readonly string[] = THINKING_FEEDBACK_LINES,
+  random: () => number = Math.random,
+) {
+  let last: string | undefined;
+  return () => {
+    const pool =
+      lines.length > 1 ? lines.filter((line) => line !== last) : lines;
+    const next = pool[Math.floor(random() * pool.length) % pool.length];
+    last = next ?? last;
+    return next ?? lines[0]!;
+  };
+}
 
 export function startThinkingFeedback(options: {
   getAudio: () => Promise<Buffer>;
   play: (audio: Buffer) => void | Promise<void>;
   isCurrent: () => boolean;
   gapMs?: number;
+  limit?: number;
 }) {
   let stopped = false;
+  let played = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = options.limit ?? THINKING_FEEDBACK_LIMIT;
   const active = () => !stopped && options.isCurrent();
   const play = async () => {
     if (!active()) return;
@@ -37,10 +64,11 @@ export function startThinkingFeedback(options: {
       const audio = await options.getAudio();
       if (!active()) return;
       await options.play(audio);
+      played += 1;
     } catch (error) {
       console.warn("Could not play thinking feedback:", error);
     }
-    if (active())
+    if (active() && played < limit)
       timer = setTimeout(() => {
         void play();
       }, options.gapMs ?? THINKING_GAP_MS);
@@ -62,13 +90,24 @@ async function playFeedback(text: string, onAudio: (audio: Buffer) => void) {
   }
 }
 
+// 合成服務可能在另一台機器上 core 先起來是常態 所以重試而不是一次就放棄。
+const PREWARM_RETRY_DELAYS_MS = [10_000, 30_000, 60_000] as const;
+
 export async function prewarmVoiceChatSpeech() {
-  try {
-    await feedbackSpeech.prewarm(feedbackLines);
-  } catch (error) {
-    console.warn(
-      `Could not prewarm voice feedback: ${error instanceof Error ? error.message : "unknown error"}`,
-    );
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await feedbackSpeech.prewarm(feedbackLines);
+      return;
+    } catch (error) {
+      const delay = PREWARM_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        console.warn(
+          `Could not prewarm voice feedback: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+        return;
+      }
+      await Bun.sleep(delay);
+    }
   }
 }
 
@@ -128,8 +167,9 @@ export async function respondToVoiceChat(
 ): Promise<VoiceChatResponse | null> {
   if (!input.isCurrent()) return null;
   const { transcript } = input;
+  const nextThinkingLine = createThinkingLinePicker();
   const stopFeedback = startThinkingFeedback({
-    getAudio: () => feedbackSpeech.get(THINKING_FEEDBACK),
+    getAudio: () => feedbackSpeech.get(nextThinkingLine()),
     play: (audio) => input.onAudio(audio, "feedback"),
     isCurrent: input.isCurrent,
   });
@@ -147,6 +187,8 @@ export async function respondToVoiceChat(
   };
   const messages = contextMessages(input.history, input.channelId);
   const mcpSession = registerChatbotMcpSession({
+    // 語音裡唯一有意義的動作就是離開 join 沒有意義 她已經在頻道裡了。
+    leaveVoiceChannel: () => leaveVoiceChannel(input.guildId),
     resolveContext: async () => ({
       history: { status: "complete", messages },
       search: { status: "not_requested", results: [] },
@@ -171,6 +213,14 @@ export async function respondToVoiceChat(
         availability: "available",
         description:
           "Reply naturally in Japanese using at most two short sentences for a live Discord group voice chat. The local voice is Japanese-only, so do not include English words, emoji, Markdown, URLs, or other text that would sound unclear when spoken.",
+      },
+      {
+        id: "voice_presence",
+        category: "discord",
+        availability: "available",
+        description:
+          "Leave this voice channel when the requester asks you to. You are already in it, so there is nothing to join.",
+        tools: ["leave_voice_channel"],
       },
     ],
     executionRoute: "chat",

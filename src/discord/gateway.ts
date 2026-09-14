@@ -31,7 +31,7 @@ import {
   type TodoCommand,
 } from "./todo-command";
 import { MemberMuteTracker } from "./member-mute";
-import { transcribeSpeech } from "./local-speech";
+import { probeSpeechServices, transcribeSpeech } from "./local-speech";
 import {
   getChatbotAccessConfig,
   type ChatbotAccessConfig,
@@ -313,10 +313,10 @@ class InstagramGatewayClient implements VoiceGateway {
     registerVoiceGateway(null);
   }
 
-  joinMemberVoiceChannel(
+  async joinMemberVoiceChannel(
     guildId: string,
     userId: string,
-  ): JoinVoiceChannelResult {
+  ): Promise<JoinVoiceChannelResult> {
     if (this.socket?.readyState !== WebSocket.OPEN || !this.botUserId) {
       return { status: "gateway_unavailable" };
     }
@@ -327,7 +327,10 @@ class InstagramGatewayClient implements VoiceGateway {
       return { status: "member_not_in_voice" };
     }
 
-    return this.voiceChat.join(guildId, channelId);
+    // 進場本身就有意義 語音服務不在也照進 只是要讓她講得出原因。
+    const speech = await probeSpeechServices();
+
+    return { ...this.voiceChat.join(guildId, channelId), speech };
   }
 
   leaveVoiceChannel(guildId: string): LeaveVoiceChannelResult {
