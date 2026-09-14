@@ -218,4 +218,49 @@ describe("placeFormulaFiles", () => {
     ).toEqual([[], [file("a.png")]]);
     expect(placeFormulaFiles([], [])).toEqual([]);
   });
+
+  test("spills over to the next part when a message is full", () => {
+    const formulas = Array.from({ length: 12 }, (_, index) => ({
+      placeholder: `[公式 ${index + 1}]`,
+      file: file(`${index + 1}.png`),
+    }));
+    const parts = [formulas.map((f) => f.placeholder).join(" "), "尾巴"];
+    const placed = placeFormulaFiles(parts, formulas);
+    expect(placed[0]!.map((f) => f.filename)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `${index + 1}.png`),
+    );
+    expect(placed[1]!.map((f) => f.filename)).toEqual(["11.png", "12.png"]);
+  });
+
+  test("counts worker files already on the first part", () => {
+    const formulas = Array.from({ length: 3 }, (_, index) => ({
+      placeholder: `[公式 ${index + 1}]`,
+      file: file(`${index + 1}.png`),
+    }));
+    const placed = placeFormulaFiles(
+      ["[公式 1] [公式 2] [公式 3]", "後"],
+      formulas,
+      9,
+    );
+    expect(placed[0]!.map((f) => f.filename)).toEqual(["1.png"]);
+    expect(placed[1]!.map((f) => f.filename)).toEqual(["2.png", "3.png"]);
+  });
+
+  test("drops what does not fit in the last part", () => {
+    const formulas = Array.from({ length: 11 }, (_, index) => ({
+      placeholder: `[公式 ${index + 1}]`,
+      file: file(`${index + 1}.png`),
+    }));
+    const placed = placeFormulaFiles(["單一則"], formulas);
+    expect(placed[0]).toHaveLength(10);
+  });
+});
+
+test("attachLatexFormulas renders more than ten formulas per reply", async () => {
+  const content = Array.from(
+    { length: 12 },
+    (_, index) => `$$x_{${index}}$$`,
+  ).join("\n\n");
+  const result = await attachLatexFormulas(content);
+  expect(result.formulas).toHaveLength(12);
 });

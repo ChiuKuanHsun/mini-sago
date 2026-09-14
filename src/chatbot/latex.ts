@@ -8,7 +8,9 @@ import type { ChatbotOutgoingFile } from "../../contracts/worker-contract";
 // resvg 點陣化成 PNG 當附件送出；行內公式（$…$、\(…\)）盡量改寫成 Unicode 純文字，
 // 改寫不了的才升級成圖片。程式碼區塊和行內 code 裡的 $ 一律不碰。
 
-export const LATEX_MAX_ATTACHMENTS = 10;
+// 整篇回覆最多轉幾張圖。Discord 的「每則訊息 10 個附件」另外在 placeFormulaFiles 套。
+export const LATEX_MAX_FORMULAS = 40;
+export const DISCORD_MAX_ATTACHMENTS_PER_MESSAGE = 10;
 const LATEX_MAX_SOURCE_LENGTH = 2_000;
 const EX_TO_PX = 20;
 const IMAGE_PADDING = 24;
@@ -766,7 +768,7 @@ function rawFormula(tex: string) {
 
 export async function attachLatexFormulas(
   content: string,
-  slots = LATEX_MAX_ATTACHMENTS,
+  slots = LATEX_MAX_FORMULAS,
 ): Promise<LatexAttachmentResult> {
   const segments = splitLatexSegments(content);
   if (!segments.some((segment) => segment.kind !== "text")) {
@@ -812,16 +814,28 @@ export async function attachLatexFormulas(
 }
 
 // 回覆會被拆成多則訊息（每個空行一則），每張圖要跟著自己佔位符所在的那一則；
-// 佔位符找不到（被截斷了）就掛在最後一則。
+// 佔位符找不到（被截斷了）就掛在最後一則。一則塞滿 10 個附件時溢到下一則，
+// `reservedInFirst` 是第一則已經被 worker 附件佔掉的名額。
 export function placeFormulaFiles(
   parts: string[],
   formulas: LatexFormulaFile[],
+  reservedInFirst = 0,
 ): ChatbotOutgoingFile[][] {
   const byPart: ChatbotOutgoingFile[][] = parts.map(() => []);
   if (parts.length === 0) return byPart;
+  const used = parts.map((_, index) => (index === 0 ? reservedInFirst : 0));
   for (const { placeholder, file } of formulas) {
-    const index = parts.findIndex((part) => part.includes(placeholder));
-    byPart[index === -1 ? parts.length - 1 : index]!.push(file);
+    const wanted = parts.findIndex((part) => part.includes(placeholder));
+    let index = wanted === -1 ? parts.length - 1 : wanted;
+    while (
+      index < parts.length - 1 &&
+      used[index]! >= DISCORD_MAX_ATTACHMENTS_PER_MESSAGE
+    ) {
+      index += 1;
+    }
+    if (used[index]! >= DISCORD_MAX_ATTACHMENTS_PER_MESSAGE) continue;
+    byPart[index]!.push(file);
+    used[index]! += 1;
   }
   return byPart;
 }
