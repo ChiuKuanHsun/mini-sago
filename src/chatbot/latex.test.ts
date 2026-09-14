@@ -1,12 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 
 import {
   attachLatexFormulas,
+  FORMULA_FONT_ENV,
+  formulaFontPath,
   latexToPlainText,
   placeFormulaFiles,
   renderLatexPng,
   splitLatexSegments,
 } from "./latex";
+
+// image 裡是 Dockerfile 裝的 Noto Sans CJK；Windows 開發機拿微軟正黑頂替。
+// 兩邊都沒有（例如 VM host）就跳過字型測試。
+if (process.platform === "win32" && !process.env[FORMULA_FONT_ENV]) {
+  process.env[FORMULA_FONT_ENV] = "C:/Windows/Fonts/msjh.ttc";
+}
+const hasFormulaFont = existsSync(formulaFontPath());
 
 describe("splitLatexSegments", () => {
   test("finds display and inline math in all four delimiter styles", () => {
@@ -132,6 +142,19 @@ describe("renderLatexPng", () => {
     expect(size(stacked!).height).toBeGreaterThan(size(single!).height * 2);
     expect(size(stacked!).width).toBeLessThan(size(single!).width);
   });
+
+  test.skipIf(!hasFormulaFont)(
+    "draws CJK text with the formula font",
+    async () => {
+      // 沒字型時 <text> 畫不出來，圖上只剩「=」和「+」，PNG 明顯比較小。
+      const tex = "\\text{所有解}=\\text{一個特定解}+\\text{Null Space}";
+      const withFont = await renderLatexPng(tex);
+      const withoutFont = await renderLatexPng(tex, { withFont: false });
+      expect(withFont!.byteLength).toBeGreaterThan(
+        withoutFont!.byteLength * 1.3,
+      );
+    },
+  );
 
   test("keeps rendering after a failure", async () => {
     await renderLatexPng("\\frac{a}{");
