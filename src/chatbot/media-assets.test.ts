@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ChatbotMediaRegistry, isAllowedMediaUrl } from "./media-assets";
+import { ChatbotMediaRegistry } from "./media-assets";
 import { handleChatbotMediaRequest, registerChatbotMcpSession } from "./mcp";
 
 function handlers() {
@@ -76,35 +76,36 @@ describe("request-scoped media registry", () => {
         filename: "bad.png",
         url: "https://example.com/bad.png",
       }),
-    ).toThrow("allowed Discord or Instagram CDN");
+    ).toThrow("allowed Discord CDN");
     await expect(registry.read("missing")).rejects.toThrow("unavailable");
   });
 
-  test("accepts Instagram CDN photos but not look-alike hosts", async () => {
-    expect(
-      isAllowedMediaUrl("https://scontent-tpe1-1.cdninstagram.com/v/a.jpg?oe=1"),
-    ).toBe(true);
-    expect(isAllowedMediaUrl("https://scontent.xx.fbcdn.net/a.jpg")).toBe(true);
-    expect(isAllowedMediaUrl("https://cdn.discordapp.com/a.png")).toBe(true);
-    expect(isAllowedMediaUrl("https://evilcdninstagram.com/a.jpg")).toBe(false);
-    expect(
-      isAllowedMediaUrl("https://cdninstagram.com.evil.example/a.jpg"),
-    ).toBe(false);
-    expect(isAllowedMediaUrl("http://scontent.cdninstagram.com/a.jpg")).toBe(
-      false,
-    );
-    expect(isAllowedMediaUrl("not a url")).toBe(false);
-
+  test("lets a caller allow its own media hosts without widening the default", async () => {
     const registry = new ChatbotMediaRegistry(
-      async () => new Response("jpeg", { headers: { "content-type": "image/jpeg" } }),
+      async () => new Response("img"),
+      (url) => url.protocol === "https:" && url.hostname === "media.example",
     );
     registry.registerUrl({
-      mediaId: "123-0",
-      filename: "instagram-123-0.jpg",
-      contentType: "image/jpeg",
-      url: "https://scontent-tpe1-1.cdninstagram.com/v/a.jpg?oe=1",
+      mediaId: "own-1",
+      filename: "own.png",
+      url: "https://media.example/own.png",
     });
-    const media = await registry.read("123-0");
-    expect(new TextDecoder().decode(media.bytes)).toBe("jpeg");
+    expect(new TextDecoder().decode((await registry.read("own-1")).bytes)).toBe(
+      "img",
+    );
+    expect(() =>
+      registry.registerUrl({
+        mediaId: "discord-1",
+        filename: "d.png",
+        url: "https://cdn.discordapp.com/d.png",
+      }),
+    ).toThrow("allowed Discord CDN");
+    expect(() =>
+      new ChatbotMediaRegistry().registerUrl({
+        mediaId: "own-2",
+        filename: "own.png",
+        url: "https://media.example/own.png",
+      }),
+    ).toThrow("allowed Discord CDN");
   });
 });

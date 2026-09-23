@@ -9,8 +9,9 @@ import {
   isInstagramCdnUrl,
   parseInstagramReplyRequest,
   toInstagramPlainText,
+  toInstagramReaction,
   type InstagramReplyRequest,
-} from "./instagram-chat";
+} from "./chat";
 
 const SECRET = "s".repeat(32);
 const originalSecret = process.env.MINISAGO_INSTAGRAM_BRIDGE_SECRET;
@@ -95,7 +96,11 @@ test("builds history, aliases, and the replied-to message", () => {
   expect(job.messages.map((m) => m.id)).toEqual(["m1"]);
   expect(job.messages[0]?.authorAliases).toEqual(["Alice Chen"]);
   expect(job.requestMessage?.referencedMessage?.content).toBe("earlier");
-  expect(job.capabilities?.map((c) => c.id)).toEqual(["conversation"]);
+  expect(job.capabilities?.map((c) => c.id)).toEqual([
+    "conversation",
+    "message_reactions",
+  ]);
+  expect(job.addressingMode).toBe("mention");
 });
 
 const photo = (n: number) => ({
@@ -169,6 +174,26 @@ test("registers the attached photos so the worker can read them through core", (
   expect(registry.get("m3-0")).toBeUndefined();
 });
 
+test("passes how she was addressed through to the worker", () => {
+  for (const mode of ["mention", "reply", "continuation"] as const) {
+    const input = parseInstagramReplyRequest(body({ addressingMode: mode }));
+    expect(input?.addressingMode).toBe(mode);
+    expect(buildInstagramAnswerJob(input!, "t").addressingMode).toBe(mode);
+  }
+  expect(parseInstagramReplyRequest(body({ addressingMode: "dm" }))).toBeNull();
+  expect(parseInstagramReplyRequest(body({ addressingMode: 1 }))).toBeNull();
+});
+
+test("keeps only standard Unicode emoji as Instagram reactions", () => {
+  for (const emoji of ["❤️", "👍", "🙄", "👍🏽", "🇹🇼", "🧑‍💻"]) {
+    expect(toInstagramReaction(emoji)).toBe(emoji);
+  }
+  expect(toInstagramReaction(" 😂 ")).toBe("😂");
+  for (const bad of [undefined, "", "<:nino:123>", "ok", "1", "#", "👍 nice", "❤️".repeat(20)]) {
+    expect(toInstagramReaction(bad)).toBeUndefined();
+  }
+});
+
 test("strips Markdown that Instagram cannot render", () => {
   expect(
     toInstagramPlainText(
@@ -207,15 +232,22 @@ test("maps each outcome to a response", async () => {
   expect((await handleInstagramReplyRequest(post("{not json"))).status).toBe(400);
 
   const replied = await handleInstagramReplyRequest(post(body()), async () => ({
-    status: "replied",
+    status: "answered",
     reply: "幹嘛啦",
+    reaction: "🙄",
   }));
-  expect(await replied.json()).toEqual({ reply: "幹嘛啦" });
+  expect(await replied.json()).toEqual({ reply: "幹嘛啦", reaction: "🙄" });
+
+  const reactionOnly = await handleInstagramReplyRequest(post(body()), async () => ({
+    status: "answered",
+    reaction: "👍",
+  }));
+  expect(await reactionOnly.json()).toEqual({ reply: null, reaction: "👍" });
 
   const silent = await handleInstagramReplyRequest(post(body()), async () => ({
     status: "silent",
   }));
-  expect(await silent.json()).toEqual({ reply: null });
+  expect(await silent.json()).toEqual({ reply: null, reaction: null });
 
   const unavailable = await handleInstagramReplyRequest(post(body()), async () => ({
     status: "unavailable",

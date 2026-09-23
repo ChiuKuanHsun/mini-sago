@@ -8,9 +8,6 @@ import type {
 const MAX_INPUT_BYTES = 20 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const ALLOWED_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
-// IG 群組的照片 主機名稱帶地區編號 例如 scontent-tpe1-1.cdninstagram.com 所以比對後綴。
-// 網址本身帶簽章 core 不用登入就能下載 IG 帳號的憑證不會離開筆電。
-const ALLOWED_HOST_SUFFIXES = [".cdninstagram.com", ".fbcdn.net"];
 const MEDIA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/u;
 
 type MediaAsset = ChatbotMediaRef &
@@ -20,25 +17,8 @@ type MediaFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-export function isAllowedMediaUrl(value: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return (
-    url.protocol === "https:" &&
-    (ALLOWED_HOSTS.has(url.hostname) ||
-      ALLOWED_HOST_SUFFIXES.some((suffix) => url.hostname.endsWith(suffix)))
-  );
-}
-
-function validateUrl(value: string) {
-  if (!isAllowedMediaUrl(value)) {
-    throw new Error("Media is not hosted on an allowed Discord or Instagram CDN.");
-  }
-  return new URL(value).toString();
+function isDiscordCdnUrl(url: URL) {
+  return url.protocol === "https:" && ALLOWED_HOSTS.has(url.hostname);
 }
 
 function validatedId(mediaId: string) {
@@ -78,7 +58,19 @@ export async function readBoundedMediaBytes(
 export class ChatbotMediaRegistry {
   private readonly assets = new Map<string, MediaAsset>();
 
-  constructor(private readonly fetcher: MediaFetch = fetch) {}
+  // 預設只收 Discord CDN 其他來源由呼叫端帶自己的判斷進來
+  constructor(
+    private readonly fetcher: MediaFetch = fetch,
+    private readonly isAllowedUrl: (url: URL) => boolean = isDiscordCdnUrl,
+  ) {}
+
+  private validateUrl(value: string) {
+    const url = new URL(value);
+    if (!this.isAllowedUrl(url)) {
+      throw new Error("Media is not hosted on an allowed Discord CDN.");
+    }
+    return url.toString();
+  }
 
   registerUrl(input: {
     mediaId?: string;
@@ -93,7 +85,7 @@ export class ChatbotMediaRegistry {
       filename: input.filename,
       ...(input.contentType ? { contentType: input.contentType } : {}),
       ...(input.size !== undefined ? { size: input.size } : {}),
-      url: validateUrl(input.url),
+      url: this.validateUrl(input.url),
     };
     this.assets.set(mediaId, asset);
     return this.reference(asset);
@@ -150,7 +142,7 @@ export class ChatbotMediaRegistry {
     const response = await fetcher(asset.url, {
       signal: AbortSignal.timeout(20_000),
     });
-    if (response.url) validateUrl(response.url);
+    if (response.url) this.validateUrl(response.url);
     if (!response.ok) throw new Error("Discord could not download the media.");
     return {
       ...this.reference(asset),

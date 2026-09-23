@@ -11,7 +11,7 @@ import {
   handleChatbotMcpRequest,
   handleChatbotMediaRequest,
 } from "./chatbot/mcp";
-import { handleInstagramReplyRequest } from "./chatbot/instagram-chat";
+import { handleInstagramReplyRequest } from "./instagram/chat";
 import { startGamerForumMonitor } from "./discord/jobs/gamer-forum-monitor";
 import { startDeploymentNotificationMonitor } from "./discord/jobs/deployment-notifications";
 import { startInstagramGateway } from "./discord/gateway";

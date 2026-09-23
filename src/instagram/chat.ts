@@ -2,17 +2,19 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import type {
   AnswerJob,
+  ChatbotAddressingMode,
   ChatbotAttachment,
   ChatbotMessage,
 } from "../../contracts/worker-contract";
 import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
-import { macAgentBridge } from "./bridge";
-import { registerChatbotMcpSession } from "./mcp";
-import { ChatbotMediaRegistry } from "./media-assets";
+import { macAgentBridge } from "../chatbot/bridge";
+import { registerChatbotMcpSession } from "../chatbot/mcp";
+import { ChatbotMediaRegistry } from "../chatbot/media-assets";
 
 // IG 群組的訊息由筆電上的 instagrapi 轉接程式送進來 這裡只負責包成 AnswerJob
 // 交給 worker 再把回覆的純文字交回去。發送、輪詢、冷卻都在轉接程式那端。
-// 照 voice-chat.ts 的做法 歷史訊息由呼叫端提供 不註冊任何 Discord 工具。
+// 照 chatbot/voice-chat.ts 的做法 歷史訊息由呼叫端提供 不註冊任何 Discord 工具。
+// 跟 Discord 共用的只有 bridge、MCP session 與媒體登記表 IG 的規則都留在這個資料夾。
 
 export const INSTAGRAM_HISTORY_LIMIT = 30;
 // 被 @ 的那則和它回覆的那則一定帶 其餘只留最近幾張 每張都要下載給模型看 太多會拖慢回覆
@@ -26,6 +28,12 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 const INSTAGRAM_CDN_SUFFIXES = [".cdninstagram.com", ".fbcdn.net"];
+const INSTAGRAM_ADDRESSING_MODES = new Set<ChatbotAddressingMode>([
+  "mention",
+  "reply",
+  "continuation",
+]);
+const INSTAGRAM_REACTION_MAX_LENGTH = 16;
 
 export type InstagramImage = {
   url: string;
@@ -48,6 +56,8 @@ export type InstagramReplyRequest = {
   threadId: string;
   threadTitle?: string;
   requestMessageId: string;
+  // mention＝被 @、reply＝回覆她的訊息、continuation＝她剛回完的人接著講 沒有明確叫她
+  addressingMode: ChatbotAddressingMode;
   messages: InstagramChatMessage[];
 };
 
@@ -122,6 +132,9 @@ export function parseInstagramReplyRequest(
   const requestMessageId = stringField(body.requestMessageId, 100);
   if (!threadId || !/^\d+$/u.test(threadId) || !requestMessageId) return null;
   if (!Array.isArray(body.messages) || body.messages.length === 0) return null;
+  const addressingMode = body.addressingMode ?? "mention";
+  if (!INSTAGRAM_ADDRESSING_MODES.has(addressingMode as ChatbotAddressingMode))
+    return null;
 
   const messages: InstagramChatMessage[] = [];
   for (const raw of body.messages.slice(-INSTAGRAM_HISTORY_LIMIT)) {
@@ -136,8 +149,22 @@ export function parseInstagramReplyRequest(
     threadId,
     threadTitle: stringField(body.threadTitle, 100),
     requestMessageId,
+    addressingMode: addressingMode as ChatbotAddressingMode,
     messages,
   };
+}
+
+// IG 的表情只能是一般 Unicode emoji Discord 的自訂表情 <:name:id> 在這裡不存在
+export function toInstagramReaction(value: string | undefined) {
+  const emoji = value?.trim();
+  if (!emoji || emoji.length > INSTAGRAM_REACTION_MAX_LENGTH) return undefined;
+  const onlyEmoji =
+    /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\ufe0f)+$/u;
+  // 國旗由區域指示符號組成 不算 Extended_Pictographic 要另外認
+  const hasPicture = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+  return onlyEmoji.test(emoji) && hasPicture.test(emoji)
+    ? emoji
+    : undefined;
 }
 
 // IG 只顯示純文字 模型偶爾還是會照 Discord 的習慣輸出 Markdown 這裡把常見的拆掉。
@@ -252,14 +279,21 @@ export function buildInstagramAnswerJob(
       (message) => message.id !== input.requestMessageId,
     ),
     mcpAccessToken,
-    addressingMode: "mention",
+    addressingMode: input.addressingMode,
     capabilities: [
       {
         id: "conversation",
         category: "conversation",
         availability: "available",
         description:
-          "This conversation is an Instagram group chat, not Discord. Reply in the requester's language, as a short chat message (usually one to three sentences unless they ask for detail). Photos people sent are attached as images when available; older ones appear only as a bracketed placeholder. Instagram shows plain text only: no Markdown, headings, bold, tables, code blocks, embeds, reactions, or Discord mentions. Refer to people by their Instagram username. No Discord tools, server memory, reminders, or files are available here.",
+          "This conversation is an Instagram group chat, not Discord. Reply in the requester's language, as a short chat message (usually one to three sentences unless they ask for detail). Photos, stickers, and the cover image of shared Reels or posts are attached as images when available; older ones appear only as a bracketed placeholder such as [分享了 @someone 的 Reels]. Messages authored by \"Meta AI\" come from Instagram's built-in AI assistant that members can summon; it is not a group member and not you. Instagram shows plain text only: no Markdown, headings, bold, tables, code blocks, embeds, or Discord mentions. Refer to people by their Instagram username. No Discord tools, server memory, reminders, or files are available here.",
+      },
+      {
+        id: "message_reactions",
+        category: "conversation",
+        availability: "available",
+        description:
+          "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available.",
       },
     ],
     executionRoute: "chat",
@@ -267,7 +301,7 @@ export function buildInstagramAnswerJob(
 }
 
 export type InstagramReplyResult =
-  | { status: "replied"; reply: string }
+  | { status: "answered"; reply?: string; reaction?: string }
   | { status: "silent" }
   | { status: "unavailable" }
   | { status: "failed" };
@@ -275,7 +309,9 @@ export type InstagramReplyResult =
 // answer job 的附件 worker 不自己下載 而是經由 MCP 向 core 的媒體登記表要
 // 沒登記的圖 worker 只會拿到 Media is unavailable 所以要跟 Discord 一樣先登記。
 export function buildInstagramMediaRegistry(input: InstagramReplyRequest) {
-  const registry = new ChatbotMediaRegistry();
+  const registry = new ChatbotMediaRegistry(fetch, (url) =>
+    isInstagramCdnUrl(url.toString()),
+  );
   registry.registerMessages(buildInstagramMessages(input));
   return registry;
 }
@@ -303,9 +339,15 @@ export async function respondToInstagramMessage(
     if (dispatch.status !== "accepted") return { status: "unavailable" };
     const result = await dispatch.result;
     if (!result.ok) return { status: "failed" };
-    const reply = parseChatbotAnswerDecision(result.content).reply;
-    const text = reply ? toInstagramPlainText(reply) : "";
-    return text ? { status: "replied", reply: text } : { status: "silent" };
+    const decision = parseChatbotAnswerDecision(result.content);
+    const reply = decision.reply ? toInstagramPlainText(decision.reply) : "";
+    const reaction = toInstagramReaction(decision.reactionEmoji);
+    if (!reply && !reaction) return { status: "silent" };
+    return {
+      status: "answered",
+      ...(reply ? { reply } : {}),
+      ...(reaction ? { reaction } : {}),
+    };
   } catch (error) {
     console.warn(
       `Could not prepare Instagram reply: ${error instanceof Error ? error.message : "unknown error"}`,
@@ -354,10 +396,13 @@ export async function handleInstagramReplyRequest(
 
   const result = await respond(input);
   switch (result.status) {
-    case "replied":
-      return Response.json({ reply: result.reply });
+    case "answered":
+      return Response.json({
+        reply: result.reply ?? null,
+        reaction: result.reaction ?? null,
+      });
     case "silent":
-      return Response.json({ reply: null });
+      return Response.json({ reply: null, reaction: null });
     case "unavailable":
       return Response.json({ error: "worker_unavailable" }, { status: 503 });
     case "failed":
