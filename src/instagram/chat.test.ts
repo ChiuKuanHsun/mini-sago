@@ -6,6 +6,7 @@ import {
   handleInstagramReplyRequest,
   INSTAGRAM_HISTORY_IMAGE_LIMIT,
   INSTAGRAM_HISTORY_LIMIT,
+  INSTAGRAM_IMAGES_PER_MESSAGE,
   isInstagramCdnUrl,
   parseInstagramReplyRequest,
   toInstagramPlainText,
@@ -192,6 +193,20 @@ test("keeps only standard Unicode emoji as Instagram reactions", () => {
   for (const bad of [undefined, "", "<:nino:123>", "ok", "1", "#", "👍 nice", "❤️".repeat(20)]) {
     expect(toInstagramReaction(bad)).toBeUndefined();
   }
+});
+
+test("accepts every photo of a shared carousel up to the worker's limit", () => {
+  expect(INSTAGRAM_IMAGES_PER_MESSAGE).toBe(10);
+  const carousel = (n: number) => Array.from({ length: n }, (_, i) => photo(i));
+  const ten = parseInstagramReplyRequest(
+    body({ messages: [message({ id: "m2", images: carousel(10) })] }),
+  ) as InstagramReplyRequest;
+  expect(buildInstagramAnswerJob(ten, "t").requestMessage?.attachments).toHaveLength(10);
+  expect(
+    parseInstagramReplyRequest(
+      body({ messages: [message({ id: "m2", images: carousel(11) })] }),
+    ),
+  ).toBeNull();
 });
 
 test("strips Markdown that Instagram cannot render", () => {

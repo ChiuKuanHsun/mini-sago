@@ -20,7 +20,8 @@ export const INSTAGRAM_HISTORY_LIMIT = 30;
 // 被 @ 的那則和它回覆的那則一定帶 其餘只留最近幾張 每張都要下載給模型看 太多會拖慢回覆
 export const INSTAGRAM_HISTORY_IMAGE_LIMIT = 3;
 const INSTAGRAM_TEXT_LIMIT = 2_000;
-const INSTAGRAM_IMAGES_PER_MESSAGE = 4;
+// 多圖貼文每一張都給她看 跟 worker 一次最多看的附件數一致
+export const INSTAGRAM_IMAGES_PER_MESSAGE = 10;
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
