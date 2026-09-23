@@ -79,4 +79,33 @@ describe("request-scoped media registry", () => {
     ).toThrow("allowed Discord CDN");
     await expect(registry.read("missing")).rejects.toThrow("unavailable");
   });
+
+  test("lets a caller allow its own media hosts without widening the default", async () => {
+    const registry = new ChatbotMediaRegistry(
+      async () => new Response("img"),
+      (url) => url.protocol === "https:" && url.hostname === "media.example",
+    );
+    registry.registerUrl({
+      mediaId: "own-1",
+      filename: "own.png",
+      url: "https://media.example/own.png",
+    });
+    expect(new TextDecoder().decode((await registry.read("own-1")).bytes)).toBe(
+      "img",
+    );
+    expect(() =>
+      registry.registerUrl({
+        mediaId: "discord-1",
+        filename: "d.png",
+        url: "https://cdn.discordapp.com/d.png",
+      }),
+    ).toThrow("allowed Discord CDN");
+    expect(() =>
+      new ChatbotMediaRegistry().registerUrl({
+        mediaId: "own-2",
+        filename: "own.png",
+        url: "https://media.example/own.png",
+      }),
+    ).toThrow("allowed Discord CDN");
+  });
 });
