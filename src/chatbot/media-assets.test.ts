@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ChatbotMediaRegistry } from "./media-assets";
+import { ChatbotMediaRegistry, isAllowedMediaUrl } from "./media-assets";
 import { handleChatbotMediaRequest, registerChatbotMcpSession } from "./mcp";
 
 function handlers() {
@@ -76,7 +76,35 @@ describe("request-scoped media registry", () => {
         filename: "bad.png",
         url: "https://example.com/bad.png",
       }),
-    ).toThrow("allowed Discord CDN");
+    ).toThrow("allowed Discord or Instagram CDN");
     await expect(registry.read("missing")).rejects.toThrow("unavailable");
+  });
+
+  test("accepts Instagram CDN photos but not look-alike hosts", async () => {
+    expect(
+      isAllowedMediaUrl("https://scontent-tpe1-1.cdninstagram.com/v/a.jpg?oe=1"),
+    ).toBe(true);
+    expect(isAllowedMediaUrl("https://scontent.xx.fbcdn.net/a.jpg")).toBe(true);
+    expect(isAllowedMediaUrl("https://cdn.discordapp.com/a.png")).toBe(true);
+    expect(isAllowedMediaUrl("https://evilcdninstagram.com/a.jpg")).toBe(false);
+    expect(
+      isAllowedMediaUrl("https://cdninstagram.com.evil.example/a.jpg"),
+    ).toBe(false);
+    expect(isAllowedMediaUrl("http://scontent.cdninstagram.com/a.jpg")).toBe(
+      false,
+    );
+    expect(isAllowedMediaUrl("not a url")).toBe(false);
+
+    const registry = new ChatbotMediaRegistry(
+      async () => new Response("jpeg", { headers: { "content-type": "image/jpeg" } }),
+    );
+    registry.registerUrl({
+      mediaId: "123-0",
+      filename: "instagram-123-0.jpg",
+      contentType: "image/jpeg",
+      url: "https://scontent-tpe1-1.cdninstagram.com/v/a.jpg?oe=1",
+    });
+    const media = await registry.read("123-0");
+    expect(new TextDecoder().decode(media.bytes)).toBe("jpeg");
   });
 });

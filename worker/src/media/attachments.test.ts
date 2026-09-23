@@ -5,45 +5,13 @@ import { describe, expect, test } from "bun:test";
 
 import type { ChatAnswerJob } from "../../../contracts/worker-contract";
 import type { MediaClient } from "./media-client";
-import {
-  attachmentLimits,
-  isAllowedAttachmentUrl,
-  prepareAttachments,
-} from "./attachments";
+import { attachmentLimits, prepareAttachments } from "./attachments";
 
 const answerDefaults = {
   purpose: "answer",
   executionRoute: "chat",
   mcpAccessToken: "test-token",
 } as const;
-
-describe("attachment URL allowlist", () => {
-  test("accepts Discord and Instagram CDN URLs over HTTPS", () => {
-    expect(isAllowedAttachmentUrl("https://cdn.discordapp.com/a.png")).toBe(true);
-    expect(
-      isAllowedAttachmentUrl(
-        "https://scontent-tpe1-1.cdninstagram.com/v/t1/a.jpg?oe=1",
-      ),
-    ).toBe(true);
-    expect(isAllowedAttachmentUrl("https://scontent.xx.fbcdn.net/a.jpg")).toBe(
-      true,
-    );
-  });
-
-  test("rejects look-alike hosts, plain HTTP, and garbage", () => {
-    expect(isAllowedAttachmentUrl("https://evilcdninstagram.com/a.jpg")).toBe(
-      false,
-    );
-    expect(
-      isAllowedAttachmentUrl("https://cdninstagram.com.evil.example/a.jpg"),
-    ).toBe(false);
-    expect(
-      isAllowedAttachmentUrl("http://scontent-tpe1-1.cdninstagram.com/a.jpg"),
-    ).toBe(false);
-    expect(isAllowedAttachmentUrl("https://example.com/a.png")).toBe(false);
-    expect(isAllowedAttachmentUrl("not a url")).toBe(false);
-  });
-});
 
 describe("chatbot attachment limits", () => {
   test("caps downloads at ten files and twenty megabytes each", () => {

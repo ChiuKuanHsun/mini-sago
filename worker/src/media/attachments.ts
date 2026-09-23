@@ -20,9 +20,6 @@ const ALLOWED_ATTACHMENT_HOSTS = new Set([
   "cdn.discordapp.com",
   "media.discordapp.net",
 ]);
-// IG 群組的圖片 主機名稱帶地區編號 例如 scontent-tpe1-1.cdninstagram.com 所以比對後綴。
-// 網址本身帶簽章 不需要登入就能下載 IG 帳號的憑證不會離開筆電。
-const ALLOWED_ATTACHMENT_HOST_SUFFIXES = [".cdninstagram.com", ".fbcdn.net"];
 
 const textContentTypes = new Set([
   "application/json",
@@ -157,25 +154,13 @@ function rankCandidates(job: CodexJob) {
     .slice(0, MAX_ATTACHMENTS);
 }
 
-export function isAllowedAttachmentUrl(value: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return (
-    url.protocol === "https:" &&
-    (ALLOWED_ATTACHMENT_HOSTS.has(url.hostname) ||
-      ALLOWED_ATTACHMENT_HOST_SUFFIXES.some((suffix) =>
-        url.hostname.endsWith(suffix),
-      ))
-  );
-}
-
 function validateAttachmentUrl(value: string) {
-  if (!isAllowedAttachmentUrl(value)) {
-    throw new Error("attachment URL is not an allowed Discord or Instagram CDN URL");
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    !ALLOWED_ATTACHMENT_HOSTS.has(url.hostname)
+  ) {
+    throw new Error("attachment URL is not an allowed Discord CDN URL");
   }
 }
 

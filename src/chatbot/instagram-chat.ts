@@ -8,6 +8,7 @@ import type {
 import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
 import { macAgentBridge } from "./bridge";
 import { registerChatbotMcpSession } from "./mcp";
+import { ChatbotMediaRegistry } from "./media-assets";
 
 // IG 群組的訊息由筆電上的 instagrapi 轉接程式送進來 這裡只負責包成 AnswerJob
 // 交給 worker 再把回覆的純文字交回去。發送、輪詢、冷卻都在轉接程式那端。
@@ -271,6 +272,14 @@ export type InstagramReplyResult =
   | { status: "unavailable" }
   | { status: "failed" };
 
+// answer job 的附件 worker 不自己下載 而是經由 MCP 向 core 的媒體登記表要
+// 沒登記的圖 worker 只會拿到 Media is unavailable 所以要跟 Discord 一樣先登記。
+export function buildInstagramMediaRegistry(input: InstagramReplyRequest) {
+  const registry = new ChatbotMediaRegistry();
+  registry.registerMessages(buildInstagramMessages(input));
+  return registry;
+}
+
 export async function respondToInstagramMessage(
   input: InstagramReplyRequest,
 ): Promise<InstagramReplyResult> {
@@ -278,6 +287,7 @@ export async function respondToInstagramMessage(
     (message) => message.id !== input.requestMessageId,
   );
   const mcpSession = registerChatbotMcpSession({
+    mediaRegistry: buildInstagramMediaRegistry(input),
     resolveContext: async () => ({
       history: { status: "complete", messages: history },
       search: { status: "not_requested", results: [] },

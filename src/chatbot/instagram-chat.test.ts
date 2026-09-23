@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 
 import {
   buildInstagramAnswerJob,
+  buildInstagramMediaRegistry,
   handleInstagramReplyRequest,
   INSTAGRAM_HISTORY_IMAGE_LIMIT,
   INSTAGRAM_HISTORY_LIMIT,
@@ -151,6 +152,21 @@ test("attaches the request, its reply target, and only the newest history photos
     .filter((m) => m.attachments.length > 0)
     .map((m) => m.id);
   expect(withImages).toEqual(["h0", "h3", "h4", "h5"]);
+});
+
+test("registers the attached photos so the worker can read them through core", () => {
+  const input = parseInstagramReplyRequest(
+    body({
+      messages: [
+        message({ id: "m1", text: "[傳了一張照片或影片]", images: [photo(1)] }),
+        message({ id: "m2", images: [photo(2)] }),
+      ],
+    }),
+  ) as InstagramReplyRequest;
+  const registry = buildInstagramMediaRegistry(input);
+  expect(registry.get("m1-0")?.filename).toBe("instagram-m1-0.jpg");
+  expect(registry.get("m2-0")?.contentType).toBe("image/jpeg");
+  expect(registry.get("m3-0")).toBeUndefined();
 });
 
 test("strips Markdown that Instagram cannot render", () => {
