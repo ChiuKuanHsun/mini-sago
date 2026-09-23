@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import type {
   AnswerJob,
+  ChatbotAttachment,
   ChatbotMessage,
 } from "../../contracts/worker-contract";
 import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
@@ -13,7 +14,22 @@ import { registerChatbotMcpSession } from "./mcp";
 // 照 voice-chat.ts 的做法 歷史訊息由呼叫端提供 不註冊任何 Discord 工具。
 
 export const INSTAGRAM_HISTORY_LIMIT = 30;
+// 被 @ 的那則和它回覆的那則一定帶 其餘只留最近幾張 每張都要下載給模型看 太多會拖慢回覆
+export const INSTAGRAM_HISTORY_IMAGE_LIMIT = 3;
 const INSTAGRAM_TEXT_LIMIT = 2_000;
+const INSTAGRAM_IMAGES_PER_MESSAGE = 4;
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+const INSTAGRAM_CDN_SUFFIXES = [".cdninstagram.com", ".fbcdn.net"];
+
+export type InstagramImage = {
+  url: string;
+  contentType: string;
+};
 
 export type InstagramChatMessage = {
   id: string;
@@ -24,6 +40,7 @@ export type InstagramChatMessage = {
   timestamp: string;
   fromSelf: boolean;
   replyToId?: string;
+  images: InstagramImage[];
 };
 
 export type InstagramReplyRequest = {
@@ -39,6 +56,35 @@ function stringField(value: unknown, maxLength: number) {
   return trimmed && trimmed.length <= maxLength ? trimmed : undefined;
 }
 
+export function isInstagramCdnUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      INSTAGRAM_CDN_SUFFIXES.some((suffix) => url.hostname.endsWith(suffix))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function parseImages(value: unknown): InstagramImage[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > INSTAGRAM_IMAGES_PER_MESSAGE)
+    return null;
+  const images: InstagramImage[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") return null;
+    const image = raw as Record<string, unknown>;
+    const url = stringField(image.url, 2_000);
+    const contentType = stringField(image.contentType, 40)?.toLowerCase();
+    if (!url || !isInstagramCdnUrl(url)) return null;
+    if (!contentType || !Object.hasOwn(IMAGE_EXTENSIONS, contentType)) return null;
+    images.push({ url, contentType });
+  }
+  return images;
+}
+
 function parseMessage(value: unknown): InstagramChatMessage | null {
   if (!value || typeof value !== "object") return null;
   const body = value as Record<string, unknown>;
@@ -51,6 +97,8 @@ function parseMessage(value: unknown): InstagramChatMessage | null {
     return null;
   if (typeof body.text !== "string" || typeof body.fromSelf !== "boolean")
     return null;
+  const images = parseImages(body.images);
+  if (!images) return null;
   return {
     id,
     authorId,
@@ -60,6 +108,7 @@ function parseMessage(value: unknown): InstagramChatMessage | null {
     timestamp,
     fromSelf: body.fromSelf,
     replyToId: stringField(body.replyToId, 100),
+    images,
   };
 }
 
@@ -105,10 +154,40 @@ export function toInstagramPlainText(text: string) {
     .trim();
 }
 
+function imageAttachments(message: InstagramChatMessage): ChatbotAttachment[] {
+  return message.images.map((image, index) => ({
+    id: `${message.id}-${index}`,
+    filename: `instagram-${message.id}-${index}.${IMAGE_EXTENSIONS[image.contentType]}`,
+    contentType: image.contentType,
+    // IG 不提供大小 worker 下載時會照實際位元組數檢查上限
+    size: 0,
+    url: image.url,
+  }));
+}
+
+// 決定哪些訊息的圖片要交給模型：被 @ 的那則、它回覆的那則，加上最近幾張。
+function messagesWithVisibleImages(input: InstagramReplyRequest) {
+  const request = input.messages.find(
+    (message) => message.id === input.requestMessageId,
+  );
+  const visible = new Set<string>(
+    [request?.id, request?.replyToId].filter((id): id is string => !!id),
+  );
+  let budget = INSTAGRAM_HISTORY_IMAGE_LIMIT;
+  for (const message of [...input.messages].reverse()) {
+    if (budget <= 0) break;
+    if (message.images.length === 0 || visible.has(message.id)) continue;
+    visible.add(message.id);
+    budget -= message.images.length;
+  }
+  return visible;
+}
+
 function chatbotMessage(
   message: InstagramChatMessage,
   channelId: string,
   channelName: string,
+  withImages: boolean,
 ): Omit<ChatbotMessage, "referencedMessage"> {
   return {
     id: message.id,
@@ -119,7 +198,7 @@ function chatbotMessage(
       : {}),
     timestamp: message.timestamp,
     content: message.text,
-    attachments: [],
+    attachments: withImages ? imageAttachments(message) : [],
     channelId,
     channelName,
   };
@@ -130,10 +209,11 @@ export function buildInstagramMessages(input: InstagramReplyRequest) {
   const channelName = input.threadTitle
     ? `Instagram group: ${input.threadTitle}`
     : "Instagram group";
+  const visible = messagesWithVisibleImages(input);
   const base = new Map(
     input.messages.map((message) => [
       message.id,
-      chatbotMessage(message, channelId, channelName),
+      chatbotMessage(message, channelId, channelName, visible.has(message.id)),
     ]),
   );
   return input.messages.map((message): ChatbotMessage => {
@@ -178,7 +258,7 @@ export function buildInstagramAnswerJob(
         category: "conversation",
         availability: "available",
         description:
-          "This conversation is an Instagram group chat, not Discord. Reply in the requester's language, as a short chat message (usually one to three sentences unless they ask for detail). Instagram shows plain text only: no Markdown, headings, bold, tables, code blocks, embeds, reactions, or Discord mentions. Refer to people by their Instagram username. No Discord tools, server memory, reminders, or files are available here.",
+          "This conversation is an Instagram group chat, not Discord. Reply in the requester's language, as a short chat message (usually one to three sentences unless they ask for detail). Photos people sent are attached as images when available; older ones appear only as a bracketed placeholder. Instagram shows plain text only: no Markdown, headings, bold, tables, code blocks, embeds, reactions, or Discord mentions. Refer to people by their Instagram username. No Discord tools, server memory, reminders, or files are available here.",
       },
     ],
     executionRoute: "chat",

@@ -3,7 +3,9 @@ import { afterEach, expect, test } from "bun:test";
 import {
   buildInstagramAnswerJob,
   handleInstagramReplyRequest,
+  INSTAGRAM_HISTORY_IMAGE_LIMIT,
   INSTAGRAM_HISTORY_LIMIT,
+  isInstagramCdnUrl,
   parseInstagramReplyRequest,
   toInstagramPlainText,
   type InstagramReplyRequest,
@@ -93,6 +95,62 @@ test("builds history, aliases, and the replied-to message", () => {
   expect(job.messages[0]?.authorAliases).toEqual(["Alice Chen"]);
   expect(job.requestMessage?.referencedMessage?.content).toBe("earlier");
   expect(job.capabilities?.map((c) => c.id)).toEqual(["conversation"]);
+});
+
+const photo = (n: number) => ({
+  url: `https://scontent-tpe1-1.cdninstagram.com/v/p${n}.jpg?oe=1`,
+  contentType: "image/jpeg",
+});
+
+test("only accepts images hosted on Instagram's CDN", () => {
+  expect(isInstagramCdnUrl(photo(1).url)).toBe(true);
+  expect(isInstagramCdnUrl("https://scontent.xx.fbcdn.net/a.jpg")).toBe(true);
+  expect(isInstagramCdnUrl("https://evilcdninstagram.com/a.jpg")).toBe(false);
+  expect(isInstagramCdnUrl("http://scontent.cdninstagram.com/a.jpg")).toBe(false);
+  expect(
+    parseInstagramReplyRequest(
+      body({
+        messages: [
+          message({ id: "m2", images: [{ url: "https://example.com/a.jpg", contentType: "image/jpeg" }] }),
+        ],
+      }),
+    ),
+  ).toBeNull();
+  for (const contentType of ["text/html", "constructor", "image/svg+xml"]) {
+    expect(
+      parseInstagramReplyRequest(
+        body({ messages: [message({ id: "m2", images: [{ ...photo(1), contentType }] })] }),
+      ),
+    ).toBeNull();
+  }
+});
+
+test("attaches the request, its reply target, and only the newest history photos", () => {
+  expect(INSTAGRAM_HISTORY_IMAGE_LIMIT).toBe(3);
+  const history = Array.from({ length: 6 }, (_, i) =>
+    message({ id: `h${i}`, text: "[傳了一張照片或影片]", images: [photo(i)] }),
+  );
+  const input = parseInstagramReplyRequest(
+    body({
+      requestMessageId: "req",
+      messages: [
+        ...history,
+        message({ id: "req", text: "@nino 這張呢", images: [photo(9)], replyToId: "h0" }),
+      ],
+    }),
+  ) as InstagramReplyRequest;
+  const job = buildInstagramAnswerJob(input, "token");
+
+  expect(job.requestMessage?.attachments.map((a) => a.url)).toEqual([photo(9).url]);
+  expect(job.requestMessage?.attachments[0]?.filename).toBe("instagram-req-0.jpg");
+  expect(job.requestMessage?.attachments[0]?.contentType).toBe("image/jpeg");
+  expect(job.requestMessage?.referencedMessage?.attachments.map((a) => a.url)).toEqual([
+    photo(0).url,
+  ]);
+  const withImages = job.messages
+    .filter((m) => m.attachments.length > 0)
+    .map((m) => m.id);
+  expect(withImages).toEqual(["h0", "h3", "h4", "h5"]);
 });
 
 test("strips Markdown that Instagram cannot render", () => {
