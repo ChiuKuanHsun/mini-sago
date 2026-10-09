@@ -6,6 +6,8 @@ import {
   handleInstagramReplyRequest,
   INSTAGRAM_HISTORY_IMAGE_LIMIT,
   INSTAGRAM_HISTORY_LIMIT,
+  INSTAGRAM_HISTORY_MIN_MESSAGES,
+  INSTAGRAM_HISTORY_WINDOW_MS,
   INSTAGRAM_IMAGES_PER_MESSAGE,
   isInstagramCdnUrl,
   parseInstagramReplyRequest,
@@ -65,6 +67,72 @@ test("parses a valid request and keeps only the newest history", () => {
   );
   expect(parsed?.messages).toHaveLength(INSTAGRAM_HISTORY_LIMIT);
   expect(parsed?.messages[0]?.id).toBe("m5");
+});
+
+const at = (hour: number, minute = 0) =>
+  `2026-10-09T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+
+test("drops history older than the window but keeps the last few and the reply target", () => {
+  expect(INSTAGRAM_HISTORY_WINDOW_MS).toBe(3 * 60 * 60 * 1000);
+  expect(INSTAGRAM_HISTORY_MIN_MESSAGES).toBe(5);
+  const old = Array.from({ length: 8 }, (_, i) =>
+    message({ id: `old${i}`, text: `old ${i}`, timestamp: at(1, i) }),
+  );
+  const recent = [
+    message({ id: "r1", text: "recent 1", timestamp: at(8, 0) }),
+    message({ id: "r2", text: "recent 2", timestamp: at(8, 5) }),
+  ];
+  const input = parseInstagramReplyRequest(
+    body({
+      requestMessageId: "req",
+      messages: [
+        ...old,
+        ...recent,
+        message({ id: "req", text: "@nino 這個呢", timestamp: at(8, 6), replyToId: "old0" }),
+      ],
+    }),
+  ) as InstagramReplyRequest;
+
+  // 含觸發那則的最後 5 則，加上被回覆的 old0；其餘 3 小時前的都拿掉
+  expect(input.messages.map((m) => m.id)).toEqual([
+    "old0", "old6", "old7", "r1", "r2", "req",
+  ]);
+});
+
+test("marks a long silence at the end of the message before it", () => {
+  const input = parseInstagramReplyRequest(
+    body({
+      requestMessageId: "req",
+      messages: [
+        message({ id: "a", text: "昨天的話題", timestamp: "2026-10-08T15:00:00" }),
+        message({ id: "b", text: "還是昨天", timestamp: "2026-10-08T16:00:00" }),
+        message({ id: "req", text: "@nino 醒來了沒", timestamp: at(8, 0) }),
+      ],
+    }),
+  ) as InstagramReplyRequest;
+  const job = buildInstagramAnswerJob(input, "token");
+
+  expect(job.messages.map((m) => m.content)).toEqual([
+    "昨天的話題\n[之後隔了 1 小時才有下一則]",
+    "還是昨天\n[之後隔了 16 小時才有下一則]",
+  ]);
+  expect(job.request).toBe("@nino 醒來了沒");
+});
+
+test("leaves a lively conversation untouched", () => {
+  const input = parseInstagramReplyRequest(
+    body({
+      requestMessageId: "req",
+      messages: [
+        ...Array.from({ length: 10 }, (_, i) =>
+          message({ id: `m${i}`, text: `t${i}`, timestamp: at(7, i * 5) }),
+        ),
+        message({ id: "req", timestamp: at(8, 0) }),
+      ],
+    }),
+  ) as InstagramReplyRequest;
+  expect(input.messages).toHaveLength(11);
+  expect(input.messages.every((m) => !m.text.includes("隔了"))).toBe(true);
 });
 
 test("rejects requests she should never answer", () => {
