@@ -1,0 +1,59 @@
+# 二乃的 IG 轉接程式，跟 Discord 那兩份 compose 完全分開，停掉這份不影響其他功能。
+#
+#   docker compose -f compose.instagram.yaml --env-file .env.production --env-file .env.instagram.local up -d --build
+#
+# .env.production 只拿來代入 MINISAGO_INSTAGRAM_BRIDGE_SECRET，不會整份給這個容器。
+# .env.instagram.local 放 IG_THREAD_ID（群組 id），不進 git。
+#
+# 網路：IG 不能從資料中心 IP 連，所以上網一律走宿舍的 WireGuard。這不在 compose 裡，
+# 在 host 上：
+#   - /etc/wireguard/wgdorm.conf：AllowedIPs 0.0.0.0/0 + Table = off，PostUp 只把
+#     default dev wgdorm 放進 table 200，並做 TCP MSS clamping（隧道 MTU 1420）
+#   - ig-egress.service：ip rule from 172.30.0.0/24 lookup 200，且 table 200 有
+#     unreachable 保底——VPN 斷線時這個子網完全連不出去，不會退回 Oracle 的 IP
+# 所以 ig-egress 的 subnet 不能改，改了就會直接從 Oracle 出去。
+# 獨立的專案名稱：跟 Discord 那兩份共用 mini-sago 的話，down / --remove-orphans 會波及 core 和 worker
+name: minisago-instagram
+
+services:
+  instagram:
+    image: minisago-instagram:local
+    build: ./instagram-bridge
+    container_name: minisago-instagram
+    restart: unless-stopped
+    init: true
+    # = host 上 ubuntu 的 uid/gid（這台 VM 是 1001，不是常見的 1000），
+    # 不然讀寫不了 bind mount 的 session.json
+    user: "1001:1001"
+    environment:
+      MINISAGO_INSTAGRAM_BRIDGE_URL: http://core:3000/api/internal/instagram-reply
+      MINISAGO_INSTAGRAM_BRIDGE_SECRET: ${MINISAGO_INSTAGRAM_BRIDGE_SECRET:?需要 --env-file .env.production}
+      IG_THREAD_ID: ${IG_THREAD_ID:?需要 --env-file .env.instagram.local}
+      IG_SESSION_FILE: /state/session.json
+    volumes:
+      # session.json 等同登入憑證，放在 repo 外面
+      - ${IG_STATE_DIR:-/home/ubuntu/minisago-ig-state}:/state
+    # VM 的上游 DNS 169.254.169.254 從隧道裡到不了；這樣 DNS 也走 VPN
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    # 只是輪詢加轉送，大部分時間在睡
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      ig-egress:
+        # 預設路由走這個網路 = 走 VPN
+        gw_priority: 1
+      # 只用來連 core:3000，不需要 tailscale
+      minisago-edge: {}
+
+networks:
+  ig-egress:
+    name: minisago-ig-egress
+    driver_opts:
+      com.docker.network.driver.mtu: "1420"
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  minisago-edge:
+    external: true
