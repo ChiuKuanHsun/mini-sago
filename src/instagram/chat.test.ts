@@ -135,6 +135,18 @@ test("leaves a lively conversation untouched", () => {
   expect(input.messages.every((m) => !m.text.includes("隔了"))).toBe(true);
 });
 
+test("lets her stay silent only when she was not @-mentioned", () => {
+  const ids = (addressingMode: string) =>
+    buildInstagramAnswerJob(
+      parseInstagramReplyRequest(body({ addressingMode })) as InstagramReplyRequest,
+      "token",
+    ).capabilities?.map((c) => c.id);
+
+  expect(ids("mention")).not.toContain("optional_reply");
+  expect(ids("reply")).toContain("optional_reply");
+  expect(ids("continuation")).toContain("optional_reply");
+});
+
 test("rejects requests she should never answer", () => {
   expect(parseInstagramReplyRequest(body({ requestMessageId: "missing" }))).toBeNull();
   expect(

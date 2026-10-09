@@ -334,6 +334,18 @@ export function buildInstagramAnswerJob(
         description:
           "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available.",
       },
+      // 被 @ 一定要有反應 不然看起來像壞掉；回覆她或延續對話時 讓她自己決定要不要接話
+      ...(input.addressingMode === "mention"
+        ? []
+        : [
+            {
+              id: "optional_reply",
+              category: "conversation" as const,
+              availability: "available" as const,
+              description:
+                "You were not @-mentioned: the member replied to your message or kept talking right after your reply, so you may let this message pass by returning both reply and reaction as null. Do that when a friend in the group would not answer: it is meant for someone else, it only acknowledges or wraps up the exchange, or it is a remark about adjusting, testing, or fixing you. Answer when it asks you something, teases or challenges you, or clearly expects your response. A reaction alone is fine when a full reply would be too much.",
+            },
+          ]),
     ],
     executionRoute: "chat",
   };
