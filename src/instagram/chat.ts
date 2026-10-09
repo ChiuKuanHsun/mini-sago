@@ -41,6 +41,12 @@ const INSTAGRAM_ADDRESSING_MODES = new Set<ChatbotAddressingMode>([
   "continuation",
 ]);
 const INSTAGRAM_REACTION_MAX_LENGTH = 16;
+// 模型自己很少按表情 也做不到真的隨機；由這裡抽籤 抽中的那次才提示她順便按一個
+export const INSTAGRAM_REACTION_NUDGE_RATE = 0.25;
+const INSTAGRAM_REACTION_DESCRIPTION =
+  "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available. A message that only acknowledges or wraps up the exchange, such as 好喔, 了解, or 謝啦, is usually best answered with a reaction alone and no reply text.";
+const INSTAGRAM_REACTION_NUDGE =
+  " For this message, also add a reaction that shows your mood alongside your reply, such as 🙄 when you tease, 😤 when annoyed, or 👍 when you agree, unless no emoji fits.";
 
 export type InstagramImage = {
   url: string;
@@ -297,6 +303,7 @@ export function buildInstagramMessages(input: InstagramReplyRequest) {
 export function buildInstagramAnswerJob(
   input: InstagramReplyRequest,
   mcpAccessToken: string,
+  random: () => number = Math.random,
 ): AnswerJob {
   const messages = buildInstagramMessages(input);
   const requestMessage = messages.find(
@@ -332,7 +339,8 @@ export function buildInstagramAnswerJob(
         category: "conversation",
         availability: "available",
         description:
-          "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available.",
+          INSTAGRAM_REACTION_DESCRIPTION +
+          (random() < INSTAGRAM_REACTION_NUDGE_RATE ? INSTAGRAM_REACTION_NUDGE : ""),
       },
       // 被 @ 一定要有反應 不然看起來像壞掉；回覆她或延續對話時 讓她自己決定要不要接話
       ...(input.addressingMode === "mention"

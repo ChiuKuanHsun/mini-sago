@@ -9,6 +9,7 @@ import {
   INSTAGRAM_HISTORY_MIN_MESSAGES,
   INSTAGRAM_HISTORY_WINDOW_MS,
   INSTAGRAM_IMAGES_PER_MESSAGE,
+  INSTAGRAM_REACTION_NUDGE_RATE,
   isInstagramCdnUrl,
   parseInstagramReplyRequest,
   toInstagramPlainText,
@@ -133,6 +134,20 @@ test("leaves a lively conversation untouched", () => {
   ) as InstagramReplyRequest;
   expect(input.messages).toHaveLength(11);
   expect(input.messages.every((m) => !m.text.includes("隔了"))).toBe(true);
+});
+
+test("nudges her to add a reaction on roughly one request in four", () => {
+  expect(INSTAGRAM_REACTION_NUDGE_RATE).toBe(0.25);
+  const input = parseInstagramReplyRequest(body()) as InstagramReplyRequest;
+  const reactions = (roll: number) =>
+    buildInstagramAnswerJob(input, "token", () => roll).capabilities?.find(
+      (c) => c.id === "message_reactions",
+    )?.description;
+
+  expect(reactions(0.1)).toContain("also add a reaction that shows your mood");
+  expect(reactions(0.9)).not.toContain("also add a reaction");
+  // 收尾的話只按表情 不管有沒有抽中都要說
+  expect(reactions(0.9)).toContain("reaction alone and no reply text");
 });
 
 test("lets her stay silent only when she was not @-mentioned", () => {
