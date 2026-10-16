@@ -48,6 +48,8 @@ CONTINUATION_SECONDS = 5 * 60
 ACTIVE_WINDOW = 5 * 60
 POLL_ACTIVE = (2, 4)
 POLL_IDLE = (10, 20)
+# seq_id 沒變也每隔這麼久讀一次訊息：序號來源被 IG 改過一次，萬一又不準，最多晚這麼久而不是完全不回
+FORCE_READ_SECONDS = 60
 REQUEST_TIMEOUT = 150      # core 那邊一則回答最久可能跑到 1-2 分鐘
 
 
@@ -120,6 +122,7 @@ def main(thread_id: str) -> None:
 
     seen = {m.id for m in cl.direct_messages(thread_id, amount=HISTORY)}
     last_seq = inbox_seq(cl)
+    last_read = time.time()
     last_reply_at = 0.0
     last_activity = 0.0
     # 她剛回完誰：(user_id, 到期時間)。下一則任何人的訊息都會把它用掉
@@ -131,15 +134,19 @@ def main(thread_id: str) -> None:
         time.sleep(random.uniform(*(POLL_ACTIVE if active else POLL_IDLE)))
         try:
             seq = inbox_seq(cl)
-            if seq == last_seq:
+            forced = seq == last_seq
+            if forced and time.time() - last_read < FORCE_READ_SECONDS:
                 continue
             last_seq = seq
             messages = cl.direct_messages(thread_id, amount=HISTORY)
+            last_read = time.time()
         except Exception as e:
             print(f"!! 讀取失敗：{type(e).__name__}: {e}")
             continue
 
         history = list(reversed(messages))  # 舊到新
+        if forced and any(m.id not in seen and not m.is_sent_by_viewer for m in history):
+            print("!! seq_id 沒變卻有新訊息：序號來源可能又不準了")
         for m in history:
             if m.id in seen:
                 continue
