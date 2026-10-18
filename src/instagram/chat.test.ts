@@ -10,6 +10,9 @@ import {
   INSTAGRAM_HISTORY_WINDOW_MS,
   INSTAGRAM_IMAGES_PER_MESSAGE,
   INSTAGRAM_REACTION_NUDGE_RATE,
+  INSTAGRAM_REACTION_POOL,
+  INSTAGRAM_REACTION_SAMPLE_SIZE,
+  sampleReactions,
   isInstagramCdnUrl,
   parseInstagramReplyRequest,
   toInstagramPlainText,
@@ -144,7 +147,7 @@ test("nudges her to add a reaction on roughly one request in four", () => {
       (c) => c.id === "message_reactions",
     )?.description;
 
-  expect(reactions(0.1)).toContain("also add a reaction that shows your mood");
+  expect(reactions(0.1)).toContain("also add a reaction alongside your reply");
   expect(reactions(0.9)).not.toContain("also add a reaction");
   // 收尾的話只按表情 不管有沒有抽中都要說
   expect(reactions(0.9)).toContain("reaction alone and no reply text");
@@ -368,4 +371,27 @@ test("maps each outcome to a response", async () => {
     status: "failed",
   }));
   expect(failed.status).toBe(502);
+});
+
+test("offers a different handful of reactions each time instead of a fixed few", () => {
+  // 每一個都要是 IG 收得下的表情 而且不能有人設禁用的笑哭
+  for (const emoji of INSTAGRAM_REACTION_POOL) {
+    expect(toInstagramReaction(emoji)).toBe(emoji);
+  }
+  expect(INSTAGRAM_REACTION_POOL).not.toContain("😂");
+  expect(INSTAGRAM_REACTION_POOL).not.toContain("🤣");
+  expect(new Set(INSTAGRAM_REACTION_POOL).size).toBe(INSTAGRAM_REACTION_POOL.length);
+
+  const sample = sampleReactions();
+  expect(sample).toHaveLength(INSTAGRAM_REACTION_SAMPLE_SIZE);
+  expect(new Set(sample).size).toBe(sample.length);
+  const seen = new Set(Array.from({ length: 50 }, () => sampleReactions()).flat());
+  expect(seen.size).toBeGreaterThan(INSTAGRAM_REACTION_SAMPLE_SIZE * 3);
+
+  const description = buildInstagramAnswerJob(
+    parseInstagramReplyRequest(body()) as InstagramReplyRequest,
+    "token",
+  ).capabilities?.find((c) => c.id === "message_reactions")?.description;
+  expect(description).toContain("A few you might reach for this time:");
+  expect(description).not.toContain("such as 🙄 when you tease");
 });

@@ -61,9 +61,32 @@ const INSTAGRAM_REACTION_MAX_LENGTH = 16;
 // 模型自己很少按表情 也做不到真的隨機；由這裡抽籤 抽中的那次才提示她順便按一個
 export const INSTAGRAM_REACTION_NUDGE_RATE = 0.25;
 const INSTAGRAM_REACTION_DESCRIPTION =
-  "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available. A message that only acknowledges or wraps up the exchange, such as 好喔, 了解, or 謝啦, is usually best answered with a reaction alone and no reply text.";
+  "React to the current Instagram message with one standard Unicode emoji when a reaction communicates something the reply does not. Custom or Discord-only emoji are not available. A message that only acknowledges or wraps up the exchange, such as 好喔, 了解, or 謝啦, is usually best answered with a reaction alone and no reply text. Choose the emoji for what this particular message says or shows (food, a photo, a brag, bad news, a dumb joke, a plan) and how you feel about it, so different messages get different reactions.";
 const INSTAGRAM_REACTION_NUDGE =
-  " For this message, also add a reaction that shows your mood alongside your reply, such as 🙄 when you tease, 😤 when annoyed, or 👍 when you agree, unless no emoji fits.";
+  " For this message, also add a reaction alongside your reply, unless no emoji fits.";
+// 固定寫幾個例子 她就只會按那幾個（實測幾乎都是 🙄 😤 👍）。
+// 每次從這裡隨機抽幾個當參考 沒有一組固定的可以抄。不放笑哭（人設禁用）。
+export const INSTAGRAM_REACTION_POOL = [
+  "🙄", "😤", "👍", "😒", "😏", "🤨", "😳", "😮", "🤔", "👀",
+  "😑", "🫠", "🥲", "😌", "😎", "🤭", "😆", "🥺", "😭", "😡",
+  "💢", "❤️", "💯", "🔥", "👏", "🙏", "🤝", "✨", "🎉", "💀",
+  "🤡", "🫡", "🙃", "😬", "😪", "🤤", "😋", "❓", "‼️", "🫶",
+];
+export const INSTAGRAM_REACTION_SAMPLE_SIZE = 5;
+
+export function sampleReactions(random: () => number = Math.random) {
+  const pool = [...INSTAGRAM_REACTION_POOL];
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [pool[index], pool[other]] = [pool[other]!, pool[index]!];
+  }
+  return pool.slice(0, INSTAGRAM_REACTION_SAMPLE_SIZE);
+}
+
+function reactionDescription(random: () => number) {
+  const nudged = random() < INSTAGRAM_REACTION_NUDGE_RATE;
+  return `${INSTAGRAM_REACTION_DESCRIPTION}${nudged ? INSTAGRAM_REACTION_NUDGE : ""} A few you might reach for this time: ${sampleReactions(random).join(" ")}; any other standard emoji that fits better is just as good.`;
+}
 
 // 筆記放在 server_memory_json（worker 會標成這個 IG 群組的筆記）
 const INSTAGRAM_NOTES_DESCRIPTION =
@@ -438,9 +461,7 @@ export function buildInstagramAnswerJob(
         id: "message_reactions",
         category: "conversation",
         availability: "available",
-        description:
-          INSTAGRAM_REACTION_DESCRIPTION +
-          (random() < INSTAGRAM_REACTION_NUDGE_RATE ? INSTAGRAM_REACTION_NUDGE : ""),
+        description: reactionDescription(random),
       },
       // 被 @ 一定要有反應 不然看起來像壞掉；回覆她或延續對話時 讓她自己決定要不要接話
       ...(input.addressingMode === "mention"
