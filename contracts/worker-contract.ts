@@ -205,6 +205,18 @@ export type SocialActionJob = ChatbotJobBase &
     socialActionCandidateMessageIds: string[];
   };
 
+// 群組聊天的長期筆記：讀一段新訊息加上現有筆記，回傳要新增、改寫或刪掉哪幾條。
+// messages 從 digestFromMessageId 起是新的，之前的只是前文。
+export type ChatDigestJob = ChatbotJobBase &
+  NonAnswerJob &
+  NonRoutingJob & {
+    purpose: "chat_digest";
+    digestNotes: ChatbotServerMemory["entries"];
+    digestFromMessageId: string;
+    availableTools?: never;
+    socialActionCandidateMessageIds?: never;
+  };
+
 type AnswerJobBase = ChatbotJobBase &
   NonRoutingJob & {
     purpose: "answer";
@@ -240,7 +252,11 @@ export type OracleAnswerJob = AnswerJobBase & {
 };
 
 export type AnswerJob = ChatAnswerJob | MacAnswerJob | OracleAnswerJob;
-export type CodexJob = AnswerJob | ExecutionRouteJob | SocialActionJob;
+export type CodexJob =
+  | AnswerJob
+  | ExecutionRouteJob
+  | SocialActionJob
+  | ChatDigestJob;
 export type ChatbotJob = CodexJob | TraceLookupJob;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -386,12 +402,34 @@ const ROUTING_ONLY_FIELDS = [
   "chatbotRepository",
 ] as const;
 
+const DIGEST_ONLY_FIELDS = ["digestNotes", "digestFromMessageId"] as const;
+
 const EXECUTION_ROUTE_FORBIDDEN_FIELDS = ANSWER_ONLY_FIELDS.filter(
   (field) => field !== "capabilities",
 );
 
 export function parseChatbotJob(value: unknown): ChatbotJob | null {
   if (!isRecord(value) || !hasCommonJobFields(value)) return null;
+
+  if (value.purpose === "chat_digest") {
+    if (
+      !isServerMemory({ revision: 0, entries: value.digestNotes }) ||
+      typeof value.digestFromMessageId !== "string" ||
+      !(value.messages as ChatbotMessage[]).some(
+        (message) => message.id === value.digestFromMessageId,
+      ) ||
+      !hasOnlyAbsent(value, [
+        ...ANSWER_ONLY_FIELDS,
+        ...ROUTING_ONLY_FIELDS,
+        "availableTools",
+        "socialActionCandidateMessageIds",
+      ])
+    ) {
+      return null;
+    }
+    return value as ChatDigestJob;
+  }
+  if (!hasOnlyAbsent(value, [...DIGEST_ONLY_FIELDS])) return null;
 
   if (value.purpose === "execution_route") {
     if (

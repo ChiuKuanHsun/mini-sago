@@ -153,3 +153,32 @@ describe("chatbot job protocol", () => {
     ).toBeNull();
   });
 });
+
+test("accepts a chat digest job and keeps its fields off every other job", () => {
+  const digest = {
+    id: "digest",
+    requesterUserId: "ig:digest",
+    purpose: "chat_digest",
+    channelId: "ig:1",
+    requestMessageId: "m2",
+    request: "",
+    messages: [
+      { id: "m1", author: "a", timestamp: "2026-10-18T00:00:00Z", content: "x", attachments: [] },
+      { id: "m2", author: "a", timestamp: "2026-10-18T00:01:00Z", content: "y", attachments: [] },
+    ],
+    digestNotes: [{ id: "n_1", content: "梗" }],
+    digestFromMessageId: "m2",
+  };
+  expect(parseChatbotJob(digest)?.purpose).toBe("chat_digest");
+  expect(parseChatbotJob({ ...digest, digestFromMessageId: "missing" })).toBeNull();
+  expect(parseChatbotJob({ ...digest, digestNotes: [{ id: 1 }] })).toBeNull();
+  expect(parseChatbotJob({ ...digest, mcpAccessToken: "t" })).toBeNull();
+  expect(
+    parseChatbotJob({
+      ...digest,
+      purpose: "answer",
+      executionRoute: "chat",
+      mcpAccessToken: "t",
+    }),
+  ).toBeNull();
+});
