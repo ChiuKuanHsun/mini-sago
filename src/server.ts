@@ -15,6 +15,7 @@ import {
   handleInstagramObserveRequest,
   handleInstagramReplyRequest,
 } from "./instagram/chat";
+import { getInstagramDigester } from "./instagram/digest";
 import { startGamerForumMonitor } from "./discord/jobs/gamer-forum-monitor";
 import { startDeploymentNotificationMonitor } from "./discord/jobs/deployment-notifications";
 import { startInstagramGateway } from "./discord/gateway";
@@ -122,6 +123,8 @@ const server = Bun.serve({
   fetch: handleRequest,
   websocket: macAgentWebSocketHandler,
 });
+// IG 聊天室筆記的定時整理 啟動就開始 群組安靜時才不用等到有人講話
+getInstagramDigester();
 
 const reminderBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
 if (reminderBotToken) {

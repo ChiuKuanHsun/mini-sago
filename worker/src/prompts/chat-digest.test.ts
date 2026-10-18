@@ -77,3 +77,9 @@ test("labels Instagram notes as the group's, not a Discord server's", () => {
     buildPromptPlan({ ...answer, channelId: "123" }, [], []).context,
   ).toContain("current Discord server");
 });
+
+test("asks for the username with the real name in parentheses", () => {
+  const plan = buildPromptPlan(job, [], []);
+  expect(plan.developerInstructions).toContain("followed by the real name or nickname");
+  expect(plan.developerInstructions).toContain("Never write a member's name without their username");
+});
