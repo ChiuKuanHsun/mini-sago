@@ -3,6 +3,9 @@
 不管有沒有叫她，每一則新訊息（包括她自己的）都會送到 core 的 /instagram-observe 存起來，
 被叫的時候 core 才看得到比 IG 一次給的 20 則更早的前文。啟動時會先補送最近 BACKFILL 則。
 
+已讀：被叫時 1 秒內已讀再回；沒叫她的訊息則像真人偶爾滑過去看（見 GLANCE_*），
+不會每則秒讀，也不會一直掛著未讀。
+
 什麼時候算在叫她（跟 Discord 一致）：
 - mention：訊息裡 @ 了她
 - reply：回覆她的訊息
@@ -45,6 +48,11 @@ CRASH_BACKOFF_SECONDS = 300
 HISTORY = 20               # 每次送給二乃的最近訊息數
 COOLDOWN_SECONDS = 5       # 兩次回覆至少間隔這麼久；模型本身要好幾秒，實際間隔會更長
 SEEN_DELAY = (0.5, 1)      # 看到訊息後停一下才標已讀，秒讀也像機器
+# 沒叫她的訊息：像真人偶爾滑過去看一眼，把當時最新那則標已讀（前面的一起算看過）。
+# 從第一則未讀開始計時，後面的訊息不會延後它，大家一直聊她也會隔一陣子看一次。
+GLANCE_ENGAGED = (20, 60)  # 她剛聊過（ENGAGED_WINDOW 內回過話），人還在群組裡
+GLANCE_IDLE = (60, 180)
+ENGAGED_WINDOW = 10 * 60
 TYPING_DELAY = (0.5, 1)    # 模型本身就要好幾秒，這裡只補一點
 CONTINUATION_SECONDS = 5 * 60
 # 群組最近有人講話就查快一點，安靜時放慢，平常的請求量不會暴增
@@ -167,11 +175,21 @@ def main(thread_id: str) -> None:
     last_activity = 0.0
     # 她剛回完誰：(user_id, 到期時間)。下一則任何人的訊息都會把它用掉
     conversation: tuple[str, float] | None = None
+    # 還沒已讀的最新一則，和她什麼時候會滑過去看
+    unread: DirectMessage | None = None
+    glance_at: float | None = None
     print(f"以 @{me} 監聽「{thread.thread_title}」；已略過 {len(seen)} 則舊訊息")
 
     while True:
         active = time.time() - last_activity < ACTIVE_WINDOW
         time.sleep(random.uniform(*(POLL_ACTIVE if active else POLL_IDLE)))
+        if unread is not None and glance_at is not None and time.time() >= glance_at:
+            try:
+                cl.direct_message_seen(int(thread_id), unread.id)
+                print(f"   (滑過去看了一眼，已讀到 {unread.timestamp:%H:%M:%S} 那則)")
+            except Exception as e:
+                print(f"!! 標已讀失敗：{type(e).__name__}: {e}")
+            unread, glance_at = None, None
         try:
             seq = inbox_seq(cl)
             forced = seq == last_seq
@@ -217,6 +235,10 @@ def main(thread_id: str) -> None:
                 mode = None
             conversation = None  # 跟 Discord 一樣：中間有任何人講話，延續就結束
             if mode is None:
+                unread = m
+                if glance_at is None:
+                    engaged = time.time() - last_reply_at < ENGAGED_WINDOW
+                    glance_at = time.time() + random.uniform(*(GLANCE_ENGAGED if engaged else GLANCE_IDLE))
                 continue
 
             wait = COOLDOWN_SECONDS - (time.time() - last_reply_at)
@@ -249,6 +271,8 @@ def main(thread_id: str) -> None:
                 cl.direct_message_seen(int(thread_id), m.id)
             except Exception as e:
                 print(f"!! 標已讀失敗（不影響回覆）：{type(e).__name__}: {e}")
+            # 已讀到這則，前面排著要滑過去看的那次就不用了
+            unread, glance_at = None, None
 
             started = time.time()
             try:
