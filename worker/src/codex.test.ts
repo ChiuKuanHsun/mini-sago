@@ -468,6 +468,27 @@ describe("Codex chatbot runner", () => {
     expect(prompt).toContain("<available_reactions_json>");
     expect(prompt).toContain("sago:emoji-1");
     expect(prompt).toContain("Return at least one of reply or reaction");
+    expect(prompt).not.toContain("Silence is allowed");
+
+    // 只有 host 給了 optional_reply（IG 沒被 @ 時）才放行完全不出聲
+    const optionalPrompt = buildCodexPrompt(
+      {
+        ...answerJob,
+        capabilities: [
+          ...answerJob.capabilities!,
+          {
+            id: "optional_reply",
+            category: "conversation" as const,
+            availability: "available" as const,
+            description: "You may let this message pass.",
+          },
+        ],
+      },
+      [],
+      [],
+    );
+    expect(optionalPrompt).toContain("Silence is allowed in this request");
+    expect(optionalPrompt).not.toContain("Return at least one of reply or reaction");
     expect(prompt).toContain(
       "exact media ID returned by the request-local tool",
     );
