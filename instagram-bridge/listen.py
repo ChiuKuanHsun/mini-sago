@@ -16,11 +16,15 @@ POLL_SECONDS = (8, 15)  # 每輪之間隨機停 8-15 秒；固定間隔最像機
 
 
 def inbox_seq(cl: Client) -> int:
-    """收件匣序號：任何對話有新訊息就會加一。回應只有幾十 bytes，手機 App 本來就會定期打。
+    """收件匣序號：任何對話有新訊息就會加一。只要一個對話、一則訊息，回應很小。
 
-    實測 badge_count 在群組來訊息時仍是 0，不能拿來判斷；seq_id 則確實 12 -> 13。
+    原本打 direct_v2/get_badge_count/，2026-10-16 起 IG 回 404「Endpoint does not exist」。
+    （當時實測 badge_count 在群組來訊息時仍是 0，不能拿來判斷；seq_id 則確實 12 -> 13。）
     """
-    r = cl.private_request("direct_v2/get_badge_count/", params={"no_raven": "1"})
+    r = cl.private_request(
+        "direct_v2/inbox/",
+        params={"limit": "1", "thread_message_limit": "1", "persistentBadging": "true"},
+    )
     return r["seq_id"]
 
 
