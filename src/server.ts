@@ -11,6 +11,7 @@ import {
   handleChatbotMcpRequest,
   handleChatbotMediaRequest,
 } from "./chatbot/mcp";
+import { handleInstagramReplyRequest } from "./instagram/chat";
 import { startGamerForumMonitor } from "./discord/jobs/gamer-forum-monitor";
 import { startDeploymentNotificationMonitor } from "./discord/jobs/deployment-notifications";
 import { startInstagramGateway } from "./discord/gateway";
@@ -90,6 +91,10 @@ function handleRequest(request: Request, server: Server<MacAgentSocketData>) {
     pathname === "/api/internal/media-access-request"
   ) {
     return handleMediaAccessNotificationRequest(request);
+  }
+
+  if (request.method === "POST" && pathname === "/api/internal/instagram-reply") {
+    return handleInstagramReplyRequest(request);
   }
 
   return new Response("找不到此頁面", { status: 404 });

@@ -17,12 +17,8 @@ type MediaFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-function validateUrl(value: string) {
-  const url = new URL(value);
-  if (url.protocol !== "https:" || !ALLOWED_HOSTS.has(url.hostname)) {
-    throw new Error("Media is not hosted on an allowed Discord CDN.");
-  }
-  return url.toString();
+function isDiscordCdnUrl(url: URL) {
+  return url.protocol === "https:" && ALLOWED_HOSTS.has(url.hostname);
 }
 
 function validatedId(mediaId: string) {
@@ -62,7 +58,19 @@ export async function readBoundedMediaBytes(
 export class ChatbotMediaRegistry {
   private readonly assets = new Map<string, MediaAsset>();
 
-  constructor(private readonly fetcher: MediaFetch = fetch) {}
+  // 預設只收 Discord CDN 其他來源由呼叫端帶自己的判斷進來
+  constructor(
+    private readonly fetcher: MediaFetch = fetch,
+    private readonly isAllowedUrl: (url: URL) => boolean = isDiscordCdnUrl,
+  ) {}
+
+  private validateUrl(value: string) {
+    const url = new URL(value);
+    if (!this.isAllowedUrl(url)) {
+      throw new Error("Media is not hosted on an allowed Discord CDN.");
+    }
+    return url.toString();
+  }
 
   registerUrl(input: {
     mediaId?: string;
@@ -77,7 +85,7 @@ export class ChatbotMediaRegistry {
       filename: input.filename,
       ...(input.contentType ? { contentType: input.contentType } : {}),
       ...(input.size !== undefined ? { size: input.size } : {}),
-      url: validateUrl(input.url),
+      url: this.validateUrl(input.url),
     };
     this.assets.set(mediaId, asset);
     return this.reference(asset);
@@ -134,7 +142,7 @@ export class ChatbotMediaRegistry {
     const response = await fetcher(asset.url, {
       signal: AbortSignal.timeout(20_000),
     });
-    if (response.url) validateUrl(response.url);
+    if (response.url) this.validateUrl(response.url);
     if (!response.ok) throw new Error("Discord could not download the media.");
     return {
       ...this.reference(asset),

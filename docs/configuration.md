@@ -33,6 +33,7 @@ live in [Discord setup](discord-setup.md) and [Workers](workers.md).
 | `MINISAGO_TRIP_WORKSPACE_TOKEN`        | No        | Dedicated token enabling guild-bound itinerary edits    |
 | `MINISAGO_MAC_BRIDGE_SECRET`           | Chatbot   | Authenticate the fixed Mac worker profile               |
 | `MINISAGO_WORKER_BRIDGE_SECRET`        | Chatbot   | Authenticate the fixed Oracle worker profile            |
+| `MINISAGO_INSTAGRAM_BRIDGE_SECRET`     | No        | Authenticate the Instagram group-chat adapter           |
 | `GITHUB_WEBHOOK_SECRET`                | PR bridge | Verify GitHub's `X-Hub-Signature-256`                   |
 | `GITHUB_PR_THREAD_CHANNEL_ID`          | No        | Discord destination for PR review threads               |
 | `GITHUB_PR_THREAD_STATE_FILE`          | No        | Persistent PR-to-thread mapping                         |

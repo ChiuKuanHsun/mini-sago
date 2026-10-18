@@ -10,6 +10,10 @@ services:
     env_file: .env.production
     # 實測峰值 91MiB Discord gateway 與 guild memory 都在這裡
     mem_limit: 1g
+    # 只給 IG 轉接程式用 綁 loopback 再由 host 的 tailscale serve 轉到 tailnet。
+    # 不直接綁 tailnet IP 開機時 docker 可能比 tailscale 先起來 綁不到就整個 core 起不來。
+    ports:
+      - "127.0.0.1:3100:3000"
     volumes:
       - minisago-core-state:/app/state
     networks:
