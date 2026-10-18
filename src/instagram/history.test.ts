@@ -5,6 +5,7 @@ import {
   handleInstagramReplyRequest,
   INSTAGRAM_CONTEXT_LIMIT,
   parseInstagramReplyRequest,
+  resolveInstagramContext,
   type InstagramChatMessage,
   type InstagramReplyRequest,
 } from "./chat";
@@ -153,6 +154,12 @@ test("still answers from what the bridge sent when the history store fails", () 
     before() {
       return [];
     },
+    notes() {
+      return [];
+    },
+    search() {
+      return [];
+    },
   };
   const input = parseInstagramReplyRequest(
     { threadId: THREAD, requestMessageId: "req", messages: [message("req", 4)] },
@@ -206,4 +213,59 @@ test("the reply endpoint reads stored history", async () => {
     history,
   );
   expect(seen?.messages.map((m) => m.text)).toEqual(["允成又遲到了", "text req"]);
+});
+
+test("searches by author and by every content term, newest first", () => {
+  const history = store();
+  history.record(THREAD, [
+    message("a", 1, { text: "允成又遲到了" }),
+    message("b", 2, { author: "bob", authorName: "Bob Lin", text: "允成 今天也 遲到" }),
+    message("c", 3, { text: "100% 認真" }),
+    message("d", 4, { text: "1000 認真" }),
+  ]);
+  history.record("999", [message("x", 1, { text: "允成又遲到了" })]);
+
+  expect(history.search(THREAD, { content: "遲到" }, 10).map((m) => m.id)).toEqual(["b", "a"]);
+  expect(history.search(THREAD, { content: "允成 今天" }, 10).map((m) => m.id)).toEqual(["b"]);
+  expect(history.search(THREAD, { author: "@bob" }, 10).map((m) => m.id)).toEqual(["b"]);
+  expect(history.search(THREAD, { author: "lin" }, 10).map((m) => m.id)).toEqual(["b"]);
+  // % 跟 _ 是字面上的字 不是萬用字元
+  expect(history.search(THREAD, { content: "0%" }, 10).map((m) => m.id)).toEqual(["c"]);
+  expect(history.search(THREAD, {}, 10)).toEqual([]);
+  expect(history.search(THREAD, { content: "遲到" }, 1).map((m) => m.id)).toEqual(["b"]);
+});
+
+test("lets her search older messages and read further back through resolve_context", () => {
+  const history = store();
+  history.record(THREAD, [
+    message("joke", 1, { text: "性轉梗的起源" }),
+    ...Array.from({ length: 5 }, (_, i) => message(`filler${i}`, 2 + i)),
+    message("future", 30, { text: "性轉 之後才講的" }),
+  ]);
+  const input = parseInstagramReplyRequest(
+    {
+      threadId: THREAD,
+      requestMessageId: "req",
+      messages: [message("req", 10, { text: "@nino 性轉是什麼梗" })],
+    },
+    history,
+  ) as InstagramReplyRequest;
+  const resolved = resolveInstagramContext(input, history, {
+    historyCount: 3,
+    queries: [{ content: "性轉" }],
+  });
+  expect(resolved.search.status).toBe("complete");
+  // 觸發那則本身和它之後的訊息都不算
+  expect(resolved.search.results.map((m) => m.id)).toEqual(["joke"]);
+  expect(resolved.history.messages.map((m) => m.id)).toEqual([
+    "filler2",
+    "filler3",
+    "filler4",
+  ]);
+
+  const none = resolveInstagramContext(input, null, {
+    historyCount: 3,
+    queries: [{ content: "性轉" }],
+  });
+  expect(none.search.status).toBe("unavailable");
 });

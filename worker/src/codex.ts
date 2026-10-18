@@ -102,6 +102,11 @@ export const SOCIAL_ACTION_PROFILE = {
   model: "gpt-5.6-luna",
   reasoningEffort: "low",
 } as const;
+// 背景整理群組筆記 沒人在等 但要判斷哪些梗值得記 用 medium
+export const CHAT_DIGEST_PROFILE = {
+  model: "gpt-5.6-luna",
+  reasoningEffort: "medium",
+} as const;
 export const CHATBOT_MODEL_VERBOSITY = "medium";
 
 type CodexRunOptions = {
@@ -309,6 +314,7 @@ export function codexProfileForJob(
 ) {
   if (job.purpose === "execution_route") return OWNER_ROUTER_PROFILE;
   if (job.purpose === "social_action") return SOCIAL_ACTION_PROFILE;
+  if (job.purpose === "chat_digest") return CHAT_DIGEST_PROFILE;
   if (job.purpose === "answer" && job.streamReply) {
     return VOICE_CHATBOT_PROFILE;
   }

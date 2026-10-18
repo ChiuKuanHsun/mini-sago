@@ -22,6 +22,12 @@ import {
   SOCIAL_ACTION_TASK_INSTRUCTION,
   SOCIAL_ACTION_OUTPUT_SCHEMA,
 } from "./social-action";
+import {
+  chatDigestContext,
+  CHAT_DIGEST_INSTRUCTIONS,
+  CHAT_DIGEST_OUTPUT_SCHEMA,
+  CHAT_DIGEST_TASK_INSTRUCTION,
+} from "./chat-digest";
 
 export {
   ARTIFACT_ANSWER_OUTPUT_SCHEMA,
@@ -32,11 +38,12 @@ export {
 } from "./answer";
 export { EXECUTION_ROUTE_OUTPUT_SCHEMA } from "./execution-route";
 export { SOCIAL_ACTION_OUTPUT_SCHEMA } from "./social-action";
+export { CHAT_DIGEST_OUTPUT_SCHEMA } from "./chat-digest";
 
 export const PROMPT_PLAN_VERSIONS = {
   policy: 15,
   task: 3,
-  context: 10,
+  context: 11,
 } as const;
 
 export type PromptPlan = {
@@ -97,6 +104,14 @@ export function buildPromptPlan(
       socialActionContext(job),
     );
   }
+  if (job.purpose === "chat_digest") {
+    return promptPlan(
+      "chat_digest",
+      CHAT_DIGEST_INSTRUCTIONS,
+      CHAT_DIGEST_TASK_INSTRUCTION,
+      chatDigestContext(job),
+    );
+  }
   return promptPlan(
     "answer",
     buildAnswerDeveloperInstructions(job, developerPolicy, macFileRoots),
@@ -127,6 +142,7 @@ export function buildCodexPrompt(
 export function outputSchemaForJob(job: CodexJob) {
   if (job.purpose === "execution_route") return EXECUTION_ROUTE_OUTPUT_SCHEMA;
   if (job.purpose === "social_action") return SOCIAL_ACTION_OUTPUT_SCHEMA;
+  if (job.purpose === "chat_digest") return CHAT_DIGEST_OUTPUT_SCHEMA;
   if (job.purpose === "answer") {
     if (job.developerTask) return undefined;
     if (job.streamReply) return VOICE_ANSWER_OUTPUT_SCHEMA;

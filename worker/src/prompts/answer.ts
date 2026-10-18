@@ -12,7 +12,7 @@ import { answerContext } from "./context";
 import { taiwaneseLanguageReference } from "./language";
 import { promptText } from "./overrides";
 
-export const PROMPT_VERSION = 61;
+export const PROMPT_VERSION = 62;
 
 export const VOICE_ANSWER_OUTPUT_SCHEMA = {
   type: "object",
