@@ -10,16 +10,23 @@ import { parseChatbotAnswerDecision } from "../../contracts/answer-contract";
 import { macAgentBridge } from "../chatbot/bridge";
 import { registerChatbotMcpSession } from "../chatbot/mcp";
 import { ChatbotMediaRegistry } from "../chatbot/media-assets";
+import { getInstagramHistory, type InstagramHistoryStore } from "./history";
 
 // IG 群組的訊息由筆電上的 instagrapi 轉接程式送進來 這裡只負責包成 AnswerJob
 // 交給 worker 再把回覆的純文字交回去。發送、輪詢、冷卻都在轉接程式那端。
 // 照 chatbot/voice-chat.ts 的做法 歷史訊息由呼叫端提供 不註冊任何 Discord 工具。
 // 跟 Discord 共用的只有 bridge、MCP session 與媒體登記表 IG 的規則都留在這個資料夾。
 
+// 轉接程式一次最多送來的訊息數
 export const INSTAGRAM_HISTORY_LIMIT = 30;
-// 群組常常一整晚沒人講話 最近 20 則可能橫跨好幾天 太舊的分享和對話會被她當成現在的話題。
+// 加上 core 存的聊天紀錄後 一次最多給她看的訊息數
+export const INSTAGRAM_CONTEXT_LIMIT = 80;
+// 一次觀察最多收的訊息數（轉接程式啟動時會補抓之前的紀錄）
+export const INSTAGRAM_OBSERVE_LIMIT = 100;
+// 群組常常一整晚沒人講話 太舊的分享和對話會被她當成現在的話題。
 // 只留觸發那則之前這段時間內的訊息 但至少留最後幾則 沉寂很久之後被叫還看得到前文。
-export const INSTAGRAM_HISTORY_WINDOW_MS = 3 * 60 * 60 * 1000;
+// 更早的事靠聊天室筆記與搜尋 不靠把原始訊息全塞給她。
+export const INSTAGRAM_HISTORY_WINDOW_MS = 12 * 60 * 60 * 1000;
 export const INSTAGRAM_HISTORY_MIN_MESSAGES = 5;
 // 兩則之間隔這麼久就標出來 讓她知道前面是之前的話題
 export const INSTAGRAM_SILENCE_MARK_MS = 60 * 60 * 1000;
@@ -138,7 +145,50 @@ function parseMessage(value: unknown): InstagramChatMessage | null {
 
 export function parseInstagramReplyRequest(
   value: unknown,
+  history?: InstagramHistory | null,
 ): InstagramReplyRequest | null {
+  const input = parseInstagramReplyBody(value);
+  if (!input) return null;
+  const request = input.messages.find(
+    (message) => message.id === input.requestMessageId,
+  )!;
+  // 紀錄壞掉不該讓她不回話 退回只用轉接程式送來的那幾則
+  try {
+    if (history) {
+      history.record(input.threadId, input.messages);
+      input.messages = withStoredHistory(
+        history.before(input.threadId, request.timestamp, INSTAGRAM_CONTEXT_LIMIT),
+        input.messages,
+        request,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `Could not read Instagram history: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
+  return { ...input, messages: recentInstagramMessages(input.messages, request) };
+}
+
+// 轉接程式送來的訊息有圖片 存起來的沒有 同一則以送來的為準。
+// 只留到觸發那則為止 避免她看到「未來」的內容。
+export function withStoredHistory(
+  stored: InstagramChatMessage[],
+  live: InstagramChatMessage[],
+  request: InstagramChatMessage,
+) {
+  const byId = new Map<string, InstagramChatMessage>();
+  for (const message of [...stored, ...live]) byId.set(message.id, message);
+  const merged = [...byId.values()].sort(
+    (left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp),
+  );
+  const upto = merged.slice(0, merged.indexOf(request) + 1);
+  return upto.slice(-INSTAGRAM_CONTEXT_LIMIT);
+}
+
+export type InstagramHistory = Pick<InstagramHistoryStore, "record" | "before">;
+
+function parseInstagramReplyBody(value: unknown): InstagramReplyRequest | null {
   if (!value || typeof value !== "object") return null;
   const body = value as Record<string, unknown>;
   const threadId = stringField(body.threadId, 100);
@@ -163,8 +213,35 @@ export function parseInstagramReplyRequest(
     threadTitle: stringField(body.threadTitle, 100),
     requestMessageId,
     addressingMode: addressingMode as ChatbotAddressingMode,
-    messages: recentInstagramMessages(messages, request),
+    messages,
   };
+}
+
+export type InstagramObservation = {
+  threadId: string;
+  messages: InstagramChatMessage[];
+};
+
+// 轉接程式每輪輪詢看到的新訊息 不管有沒有叫她都送來存
+export function parseInstagramObservation(
+  value: unknown,
+): InstagramObservation | null {
+  if (!value || typeof value !== "object") return null;
+  const body = value as Record<string, unknown>;
+  const threadId = stringField(body.threadId, 100);
+  if (!threadId || !/^\d+$/u.test(threadId)) return null;
+  if (
+    !Array.isArray(body.messages) ||
+    body.messages.length > INSTAGRAM_OBSERVE_LIMIT
+  )
+    return null;
+  const messages: InstagramChatMessage[] = [];
+  for (const raw of body.messages) {
+    const message = parseMessage(raw);
+    if (!message) return null;
+    messages.push(message);
+  }
+  return { threadId, messages };
 }
 
 function silenceLabel(ms: number) {
@@ -431,10 +508,7 @@ function configuredSecret() {
   return secret && Buffer.byteLength(secret) >= 32 ? secret : undefined;
 }
 
-export async function handleInstagramReplyRequest(
-  request: Request,
-  respond: typeof respondToInstagramMessage = respondToInstagramMessage,
-) {
+function rejectUnauthorized(request: Request) {
   const secret = configuredSecret();
   if (!secret) return new Response("Not configured.\n", { status: 503 });
 
@@ -444,10 +518,38 @@ export async function handleInstagramReplyRequest(
   if (!token || !safeEqual(token, secret)) {
     return new Response("Unauthorized.\n", { status: 401 });
   }
+  return null;
+}
+
+export async function handleInstagramObserveRequest(
+  request: Request,
+  history: InstagramHistory | null = getInstagramHistory(),
+) {
+  const rejected = rejectUnauthorized(request);
+  if (rejected) return rejected;
+
+  let input: InstagramObservation | null = null;
+  try {
+    input = parseInstagramObservation(await request.json());
+  } catch {
+    // 壞掉的 JSON 跟其他不合格的內容一樣處理。
+  }
+  if (!input) return new Response("Invalid request.\n", { status: 400 });
+  history?.record(input.threadId, input.messages);
+  return Response.json({ stored: history ? input.messages.length : 0 });
+}
+
+export async function handleInstagramReplyRequest(
+  request: Request,
+  respond: typeof respondToInstagramMessage = respondToInstagramMessage,
+  history: InstagramHistory | null = getInstagramHistory(),
+) {
+  const rejected = rejectUnauthorized(request);
+  if (rejected) return rejected;
 
   let input: InstagramReplyRequest | null = null;
   try {
-    input = parseInstagramReplyRequest(await request.json());
+    input = parseInstagramReplyRequest(await request.json(), history);
   } catch {
     // 壞掉的 JSON 跟其他不合格的內容一樣處理。
   }

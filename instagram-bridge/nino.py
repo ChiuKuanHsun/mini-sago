@@ -1,5 +1,8 @@
 """接上 MiniSago：有人叫二乃時，把群組最近的訊息送給 VM 上的 core，由她本人回覆或按表情。
 
+不管有沒有叫她，每一則新訊息（包括她自己的）都會送到 core 的 /instagram-observe 存起來，
+被叫的時候 core 才看得到比 IG 一次給的 20 則更早的前文。啟動時會先補送最近 BACKFILL 則。
+
 什麼時候算在叫她（跟 Discord 一致）：
 - mention：訊息裡 @ 了她
 - reply：回覆她的訊息
@@ -51,6 +54,9 @@ POLL_IDLE = (10, 20)
 # seq_id 沒變也每隔這麼久讀一次訊息：序號來源被 IG 改過一次，萬一又不準，最多晚這麼久而不是完全不回
 FORCE_READ_SECONDS = 60
 REQUEST_TIMEOUT = 150      # core 那邊一則回答最久可能跑到 1-2 分鐘
+BACKFILL = 100             # 啟動時補送給 core 存的訊息數；IG 一頁 20 則，等於多打幾個請求
+OBSERVE_BATCH = 100        # = core 一次收的上限
+OBSERVE_PENDING_LIMIT = 500  # core 連不上時先留著下輪再送，最多留這麼多
 
 
 def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, shared: dict[str, Shared]) -> dict:
@@ -100,6 +106,37 @@ def ask_nino(config: dict, body: dict) -> dict:
     return r.json()
 
 
+def observe(config: dict, thread_id: str, pending: list[dict]) -> None:
+    """把還沒送出的訊息交給 core 存。core 連不上就留到下一輪；內容被拒（400）就丟掉，免得卡住後面的。"""
+    url = config["url"].rsplit("/", 1)[0] + "/instagram-observe"
+    while pending:
+        batch = pending[:OBSERVE_BATCH]
+        try:
+            r = requests.post(
+                url,
+                json={"threadId": thread_id, "messages": batch},
+                headers={"authorization": f"Bearer {config['secret']}"},
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"!! 存聊天紀錄失敗，下輪再送：{type(e).__name__}: {e}")
+            break
+        if r.status_code == 400:
+            print(f"!! core 不收這批聊天紀錄（{len(batch)} 則），略過：{r.text.strip()[:200]}")
+        elif r.status_code != 200:
+            print(f"!! 存聊天紀錄失敗，下輪再送：core 回應 {r.status_code}")
+            break
+        del pending[: len(batch)]
+    del pending[:-OBSERVE_PENDING_LIMIT]
+
+
+def observed(m: DirectMessage, users: dict[str, tuple[str, str]], me: str) -> dict:
+    # 圖片網址幾天就過期，core 只存文字；不帶圖也避免一張怪網址讓整批被拒
+    payload = to_payload(m, users, me, {})
+    payload.pop("images", None)
+    return payload
+
+
 def mentions_anyone(m: DirectMessage) -> bool:
     return m.text is not None and "@" in m.text
 
@@ -120,7 +157,10 @@ def main(thread_id: str) -> None:
     users = {str(u.pk): (u.username, u.full_name or "") for u in thread.users}
     users[str(cl.user_id)] = (me, "")
 
-    seen = {m.id for m in cl.direct_messages(thread_id, amount=HISTORY)}
+    backlog = cl.direct_messages(thread_id, amount=BACKFILL)
+    seen = {m.id for m in backlog}
+    pending = [observed(m, users, me) for m in reversed(backlog)]
+    observe(config, thread_id, pending)
     last_seq = inbox_seq(cl)
     last_read = time.time()
     last_reply_at = 0.0
@@ -147,6 +187,9 @@ def main(thread_id: str) -> None:
         history = list(reversed(messages))  # 舊到新
         if forced and any(m.id not in seen and not m.is_sent_by_viewer for m in history):
             print("!! seq_id 沒變卻有新訊息：序號來源可能又不準了")
+        # 先存再回：她回覆時 core 就已經有這一輪的訊息
+        pending.extend(observed(m, users, me) for m in history if m.id not in seen)
+        observe(config, thread_id, pending)
         for m in history:
             if m.id in seen:
                 continue
@@ -230,8 +273,8 @@ def main(thread_id: str) -> None:
 
             time.sleep(random.uniform(*TYPING_DELAY))
             try:
-                sent = cl.direct_send(reply, thread_ids=[int(thread_id)], reply_to_message=m)
-                seen.add(sent.id)
+                # 不先標成看過：下一輪讀到她自己這則時會照常存進聊天紀錄，處理時再因為是她發的而略過
+                cl.direct_send(reply, thread_ids=[int(thread_id)], reply_to_message=m)
                 last_reply_at = time.time()
                 conversation = (uid, time.time() + CONTINUATION_SECONDS)
                 print(f"   -> 回覆：{reply}")

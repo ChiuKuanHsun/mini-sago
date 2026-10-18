@@ -74,10 +74,10 @@ const at = (hour: number, minute = 0) =>
   `2026-10-09T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
 
 test("drops history older than the window but keeps the last few and the reply target", () => {
-  expect(INSTAGRAM_HISTORY_WINDOW_MS).toBe(3 * 60 * 60 * 1000);
+  expect(INSTAGRAM_HISTORY_WINDOW_MS).toBe(12 * 60 * 60 * 1000);
   expect(INSTAGRAM_HISTORY_MIN_MESSAGES).toBe(5);
   const old = Array.from({ length: 8 }, (_, i) =>
-    message({ id: `old${i}`, text: `old ${i}`, timestamp: at(1, i) }),
+    message({ id: `old${i}`, text: `old ${i}`, timestamp: `2026-10-08T15:0${i}:00` }),
   );
   const recent = [
     message({ id: "r1", text: "recent 1", timestamp: at(8, 0) }),
@@ -94,7 +94,7 @@ test("drops history older than the window but keeps the last few and the reply t
     }),
   ) as InstagramReplyRequest;
 
-  // 含觸發那則的最後 5 則，加上被回覆的 old0；其餘 3 小時前的都拿掉
+  // 含觸發那則的最後 5 則，加上被回覆的 old0；其餘 12 小時前的都拿掉
   expect(input.messages.map((m) => m.id)).toEqual([
     "old0", "old6", "old7", "r1", "r2", "req",
   ]);

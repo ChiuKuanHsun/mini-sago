@@ -8,6 +8,9 @@ services:
     restart: unless-stopped
     init: true
     env_file: .env.production
+    environment:
+      # IG 群組的聊天紀錄（SQLite），留 30 天
+      MINISAGO_INSTAGRAM_STATE_DIRECTORY: /app/state/instagram
     # 實測峰值 91MiB Discord gateway 與 guild memory 都在這裡
     mem_limit: 1g
     # 只給 IG 轉接程式用 綁 loopback 再由 host 的 tailscale serve 轉到 tailnet。
