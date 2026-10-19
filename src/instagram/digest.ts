@@ -16,9 +16,9 @@ import {
 // 只在 worker 完全閒著時跑，避免佔掉回覆用的名額（worker 一次只跑 2 個 job）。
 
 // 累積這麼多則新訊息就整理一次
-export const INSTAGRAM_DIGEST_BATCH = 40;
+export const INSTAGRAM_DIGEST_BATCH = 100;
 // 不到一批 但群組安靜這麼久了也整理
-export const INSTAGRAM_DIGEST_IDLE_MS = 15 * 60 * 1000;
+export const INSTAGRAM_DIGEST_IDLE_MS = 30 * 60 * 1000;
 // 一次最多讀的新訊息 更多的留到下一次
 export const INSTAGRAM_DIGEST_MAX_MESSAGES = 150;
 // 新訊息前面附上的前文 只用來理解 不整理
