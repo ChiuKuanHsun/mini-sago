@@ -65,6 +65,9 @@ REQUEST_TIMEOUT = 150      # core 那邊一則回答最久可能跑到 1-2 分�
 BACKFILL = 100             # 啟動時補送給 core 存的訊息數；IG 一頁 20 則，等於多打幾個請求
 OBSERVE_BATCH = 100        # = core 一次收的上限
 OBSERVE_PENDING_LIMIT = 500  # core 連不上時先留著下輪再送，最多留這麼多
+# instagrapi 打 IG 的請求不帶逾時（它的 request_timeout 只是兩個請求之間的間隔），
+# 連線半開時會永遠等下去、整個輪詢停住（2026-10-29 卡了 31 小時）。（連線, 讀取）秒
+IG_TIMEOUT = (10, 30)
 
 
 def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, shared: dict[str, Shared]) -> dict:
@@ -145,6 +148,18 @@ def observed(m: DirectMessage, users: dict[str, tuple[str, str]], me: str) -> di
     return payload
 
 
+def bound_timeouts(session: requests.Session, timeout: tuple[float, float]) -> None:
+    """沒指定 timeout 的請求一律用這個；逾時會丟例外，由迴圈裡現有的 except 接住、下一輪重試。"""
+    request = session.request
+
+    def bounded(method, url, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = timeout
+        return request(method, url, **kwargs)
+
+    session.request = bounded
+
+
 def mentions_anyone(m: DirectMessage) -> bool:
     return m.text is not None and "@" in m.text
 
@@ -157,6 +172,8 @@ def main(thread_id: str) -> None:
     # instagrapi 預設每個請求前都隨機等，一輪就累積好幾秒；
     # 刻意的停頓只留在別人看得到的動作（已讀、表情、回覆）上
     cl.delay_range = []
+    bound_timeouts(cl.private, IG_TIMEOUT)
+    bound_timeouts(cl.public, IG_TIMEOUT)
 
     me = cl.account_info().username
     mention = f"@{me}".lower()
