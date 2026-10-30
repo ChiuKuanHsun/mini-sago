@@ -37,7 +37,7 @@ import requests
 from instagrapi import Client
 from instagrapi.types import DirectMessage
 
-from ig_items import Shared, describe, shared_media
+from ig_items import META_AI, Shared, describe, shared_media
 from listen import inbox_seq
 
 HERE = Path(__file__).parent
@@ -68,11 +68,15 @@ OBSERVE_PENDING_LIMIT = 500  # core 連不上時先留著下輪再送，最多�
 # instagrapi 打 IG 的請求不帶逾時（它的 request_timeout 只是兩個請求之間的間隔），
 # 連線半開時會永遠等下去、整個輪詢停住（2026-10-29 卡了 31 小時）。（連線, 讀取）秒
 IG_TIMEOUT = (10, 30)
+# 她送出的「@Meta AI」要附上 commands 才叫得出它（App 點藍字時會帶，只打字不算；2026-10-30 實測）
+META_AI_MENTION = "@Meta AI"
+# 她最多連續叫 Meta AI 幾次；到了就只送純文字，Meta AI 再 @她也改成可以不回。有人叫她就重新算
+META_AI_ROUNDS = 3
 
 
-def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, shared: dict[str, Shared]) -> dict:
+def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, my_id: str, shared: dict[str, Shared]) -> dict:
     uid = str(m.user_id)
-    username, full_name = users.get(uid, (me, "") if m.is_sent_by_viewer else (uid, ""))
+    username, full_name = users.get(uid, (me, "") if uid == my_id else (uid, ""))
     item = describe(m)
     text, images = item.text, item.images
     extra = shared.get(str(m.id))
@@ -86,7 +90,7 @@ def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, sha
         "author": item.author or username,
         "text": text,
         "timestamp": m.timestamp.isoformat(),
-        "fromSelf": bool(m.is_sent_by_viewer),
+        "fromSelf": uid == my_id,
     }
     if full_name and not item.author:
         payload["authorName"] = full_name
@@ -141,9 +145,9 @@ def observe(config: dict, thread_id: str, pending: list[dict]) -> None:
     del pending[:-OBSERVE_PENDING_LIMIT]
 
 
-def observed(m: DirectMessage, users: dict[str, tuple[str, str]], me: str) -> dict:
+def observed(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, my_id: str) -> dict:
     # 圖片網址幾天就過期，core 只存文字；不帶圖也避免一張怪網址讓整批被拒
-    payload = to_payload(m, users, me, {})
+    payload = to_payload(m, users, me, my_id, {})
     payload.pop("images", None)
     return payload
 
@@ -158,6 +162,53 @@ def bound_timeouts(session: requests.Session, timeout: tuple[float, float]) -> N
         return request(method, url, **kwargs)
 
     session.request = bounded
+
+
+def utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def send_reply(cl: Client, thread_id: str, text: str, reply_to: DirectMessage, summon_meta_ai: bool) -> bool:
+    """送出回覆，回傳有沒有叫出 Meta AI。
+
+    instagrapi 的 direct_send 只送文字，所以要叫 Meta AI 時自己組同一個請求、多帶 commands
+    （type 5 = Meta AI，格式照 App 送出的訊息抄）。只標第一個 @Meta AI，跟 App 一次叫一次一樣。
+    offset 用 UTF-16 長度算：中文實測跟字數一致，前面有 emoji 的情況還沒實測。
+    """
+    at = text.find(META_AI_MENTION)
+    # 有網址時 instagrapi 改走 link 端點，那邊收不收 commands 沒測過，先照原本送
+    if not summon_meta_ai or at < 0 or "http" in text:
+        cl.direct_send(text, thread_ids=[int(thread_id)], reply_to_message=reply_to)
+        return False
+    token = cl.generate_mutation_token()
+    data = {
+        "action": "send_item",
+        "is_x_transport_forward": "false",
+        "send_silently": "false",
+        "is_shh_mode": "0",
+        "send_attribution": "message_button",
+        "client_context": token,
+        "device_id": cl.android_device_id,
+        "mutation_token": token,
+        "_uuid": cl.uuid,
+        "btt_dual_send": "false",
+        "nav_chain": (
+            "1qT:feed_timeline:1,1qT:feed_timeline:2,1qT:feed_timeline:3,"
+            "7Az:direct_inbox:4,7Az:direct_inbox:5,5rG:direct_thread:7"
+        ),
+        "is_ae_dual_send": "false",
+        "offline_threading_id": token,
+        "text": text,
+        "thread_ids": json.dumps([int(thread_id)]),
+        "replied_to_action_source": "swipe",
+        "replied_to_item_id": reply_to.id,
+        "replied_to_client_context": reply_to.client_context,
+        "commands": json.dumps(
+            [{"offset": utf16_len(text[:at]), "length": utf16_len(META_AI_MENTION), "user_or_thread_fbid": 0, "type": 5}]
+        ),
+    }
+    cl.private_request("direct_v2/threads/broadcast/text/", data=cl.with_default_data(data), with_signature=False)
+    return True
 
 
 def mentions_anyone(m: DirectMessage) -> bool:
@@ -181,10 +232,11 @@ def main(thread_id: str) -> None:
     thread = cl.direct_thread(thread_id, amount=1)
     users = {str(u.pk): (u.username, u.full_name or "") for u in thread.users}
     users[str(cl.user_id)] = (me, "")
+    my_id = str(cl.user_id)
 
     backlog = cl.direct_messages(thread_id, amount=BACKFILL)
     seen = {m.id for m in backlog}
-    pending = [observed(m, users, me) for m in reversed(backlog)]
+    pending = [observed(m, users, me, my_id) for m in reversed(backlog)]
     observe(config, thread_id, pending)
     last_seq = inbox_seq(cl)
     last_read = time.time()
@@ -192,6 +244,8 @@ def main(thread_id: str) -> None:
     last_activity = 0.0
     # 她剛回完誰：(user_id, 到期時間)。下一則任何人的訊息都會把它用掉
     conversation: tuple[str, float] | None = None
+    # 她連續叫了 Meta AI 幾次
+    meta_rounds = 0
     # 還沒已讀的最新一則，和她什麼時候會滑過去看
     unread: DirectMessage | None = None
     glance_at: float | None = None
@@ -220,16 +274,17 @@ def main(thread_id: str) -> None:
             continue
 
         history = list(reversed(messages))  # 舊到新
-        if forced and any(m.id not in seen and not m.is_sent_by_viewer for m in history):
+        if forced and any(m.id not in seen and str(m.user_id) != my_id for m in history):
             print("!! seq_id 沒變卻有新訊息：序號來源可能又不準了")
         # 先存再回：她回覆時 core 就已經有這一輪的訊息
-        pending.extend(observed(m, users, me) for m in history if m.id not in seen)
+        pending.extend(observed(m, users, me, my_id) for m in history if m.id not in seen)
         observe(config, thread_id, pending)
         for m in history:
             if m.id in seen:
                 continue
             seen.add(m.id)
-            if m.is_sent_by_viewer:
+            # 她叫出來的 Meta AI 回覆，IG 也標成 is_sent_by_viewer（2026-10-30 實測），所以看 user_id
+            if str(m.user_id) == my_id:
                 continue
             last_activity = time.time()
             uid = str(m.user_id)
@@ -237,9 +292,12 @@ def main(thread_id: str) -> None:
             who = item.author or users.get(uid, (uid, ""))[0]
             print(f"{m.timestamp:%H:%M:%S} {who}: {item.text}")
 
-            if m.text is not None and mention in m.text.lower():
+            from_meta_ai = item.author == META_AI
+            # Meta AI 的回覆沒有 m.text，文字在卡片裡；其他卡片（例如貼文說明）裡的 @ 不算叫她
+            said = item.text if from_meta_ai else m.text
+            if said is not None and mention in said.lower():
                 mode = "mention"
-            elif m.reply is not None and bool(m.reply.is_sent_by_viewer):
+            elif m.reply is not None and str(m.reply.user_id) == my_id:
                 mode = "reply"
             elif (
                 conversation is not None
@@ -251,6 +309,10 @@ def main(thread_id: str) -> None:
             else:
                 mode = None
             conversation = None  # 跟 Discord 一樣：中間有任何人講話，延續就結束
+            if mode is not None and not from_meta_ai:
+                meta_rounds = 0  # 有人叫她，跟 Meta AI 的連續來回重新算
+            elif mode == "mention" and meta_rounds >= META_AI_ROUNDS:
+                mode = "reply"  # 跟 Meta AI 來回夠多次了：它再 @她，她可以不回
             if mode is None:
                 unread = m
                 if glance_at is None:
@@ -279,7 +341,7 @@ def main(thread_id: str) -> None:
                 "threadTitle": thread.thread_title or "",
                 "requestMessageId": str(m.id),
                 "addressingMode": mode,
-                "messages": [to_payload(x, users, me, shared) for x in upto],
+                "messages": [to_payload(x, users, me, my_id, shared) for x in upto],
             }
             # IG 的「輸入中」要走即時連線，instagrapi 做不到；先標已讀，
             # 群組會馬上看到她「看到了」，接著才是回覆，等待比較不像當機。
@@ -315,7 +377,9 @@ def main(thread_id: str) -> None:
             time.sleep(random.uniform(*TYPING_DELAY))
             try:
                 # 不先標成看過：下一輪讀到她自己這則時會照常存進聊天紀錄，處理時再因為是她發的而略過
-                cl.direct_send(reply, thread_ids=[int(thread_id)], reply_to_message=m)
+                if send_reply(cl, thread_id, reply, m, meta_rounds < META_AI_ROUNDS):
+                    meta_rounds += 1
+                    print(f"   (叫了 Meta AI，連續第 {meta_rounds} 次)")
                 last_reply_at = time.time()
                 conversation = (uid, time.time() + CONTINUATION_SECONDS)
                 print(f"   -> 回覆：{reply}")
