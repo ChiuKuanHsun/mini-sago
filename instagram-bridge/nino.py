@@ -72,6 +72,8 @@ IG_TIMEOUT = (10, 30)
 META_AI_MENTION = "@Meta AI"
 # 她最多連續叫 Meta AI 幾次；到了就只送純文字，Meta AI 再 @她也改成可以不回。有人叫她就重新算
 META_AI_ROUNDS = 3
+# inbox 失敗後多久再試一次；這段時間改用群組最新一則判斷，不一直去敲被擋的端點
+INBOX_RETRY_SECONDS = 30 * 60
 
 
 def to_payload(m: DirectMessage, users: dict[str, tuple[str, str]], me: str, my_id: str, shared: dict[str, Shared]) -> dict:
@@ -164,6 +166,40 @@ def bound_timeouts(session: requests.Session, timeout: tuple[float, float]) -> N
     session.request = bounded
 
 
+class ChangeMarker:
+    """每輪先用這個判斷有沒有新訊息，變了才抓 HISTORY 則。
+
+    平常用 inbox 的 seq_id（見 listen.inbox_seq）。2026-11-02 21:19 起 direct_v2/inbox/ 對這個帳號
+    回 403（error_code 1404006），群組本身還讀得到，整個輪詢卻因此停了 2 小時。所以 inbox 失敗時
+    改用群組最新一則的 item_id，INBOX_RETRY_SECONDS 後再試 inbox。兩種值的前綴不同，
+    切換那一輪會被當成「變了」多讀一次，不會漏訊息。
+    """
+
+    def __init__(self, cl: Client, thread_id: str) -> None:
+        self.cl = cl
+        self.thread_id = thread_id
+        self.inbox_blocked_until = 0.0
+
+    def read(self) -> str:
+        if time.time() >= self.inbox_blocked_until:
+            try:
+                seq = inbox_seq(self.cl)
+            except Exception as e:
+                self.inbox_blocked_until = time.time() + INBOX_RETRY_SECONDS
+                print(
+                    f"!! inbox 被擋（{type(e).__name__}: {str(e)[:120]}），改用群組最新訊息判斷，"
+                    f"{INBOX_RETRY_SECONDS // 60} 分鐘後再試 inbox"
+                )
+            else:
+                if self.inbox_blocked_until:
+                    print("   (inbox 恢復了，改回用 seq_id 判斷)")
+                    self.inbox_blocked_until = 0.0
+                return f"seq:{seq}"
+        r = self.cl.private_request(f"direct_v2/threads/{self.thread_id}/", params={"limit": "1"})
+        items = r["thread"]["items"]
+        return f"item:{items[0]['item_id']}" if items else "item:"
+
+
 def utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
@@ -238,7 +274,8 @@ def main(thread_id: str) -> None:
     seen = {m.id for m in backlog}
     pending = [observed(m, users, me, my_id) for m in reversed(backlog)]
     observe(config, thread_id, pending)
-    last_seq = inbox_seq(cl)
+    marker = ChangeMarker(cl, thread_id)
+    last_seq = marker.read()
     last_read = time.time()
     last_reply_at = 0.0
     last_activity = 0.0
@@ -262,7 +299,7 @@ def main(thread_id: str) -> None:
                 print(f"!! 標已讀失敗：{type(e).__name__}: {e}")
             unread, glance_at = None, None
         try:
-            seq = inbox_seq(cl)
+            seq = marker.read()
             forced = seq == last_seq
             if forced and time.time() - last_read < FORCE_READ_SECONDS:
                 continue
